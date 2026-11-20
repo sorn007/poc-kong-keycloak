@@ -1,0 +1,17 @@
+# secrets — ห้าม commit
+.env
+
+# generated files (สร้างโดย scripts/setup.sh)
+keycloak/central-realm.json
+kong/kong.yml
+
+# build artifacts
+node_modules/
+dist/
+*.log
+
+# Playwright screenshot tool
+node_modules/
+
+# Claude local settings
+.claude/

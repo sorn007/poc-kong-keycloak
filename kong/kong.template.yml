@@ -1,0 +1,190 @@
+# Kong DB-less declarative config (POC)
+# หมายเหตุ: jwt plugin ของ Kong OSS ตรวจเพียง signature (RS256) + iss + exp เท่านั้น
+# ไม่ได้ตรวจ aud / scope / revocation — validation ที่เชื่อถือได้ยังเป็นหน้าที่
+# Central Guard/Middleware ของ Buyer/CIS (ดู rootcase.md §3)
+_format_version: "3.0"
+_transform: true
+
+services:
+  # Route หลักของ Open API — ตรวจ JWT ที่ gateway (signature + iss) แล้วให้ service ตรวจ aud/scope ต่อ
+  - name: buyer-open-api
+    url: http://buyer-api:3000
+    routes:
+      - name: buyer-open-route
+        paths:
+          - /openapi/buyer
+        strip_path: true
+    plugins:
+      - name: jwt
+        config:
+          key_claim_name: iss
+          claims_to_verify:
+            - exp
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 1
+      - name: prometheus
+        config:
+          status_code_metrics: true
+          bandwidth_metrics: true
+          latency_metrics: true
+      - name: cors
+        config:
+          origins: ["*"]
+          methods: [GET, POST, OPTIONS]
+          headers: [Authorization, apikey, Content-Type]
+          credentials: false
+          max_age: 3600
+
+  # Phase 7 — ทางเลือก API Key (key-auth) เทียบกับ OAuth client credential
+  - name: buyer-keyauth-api
+    url: http://buyer-api:3000
+    routes:
+      - name: buyer-keyauth-route
+        paths:
+          - /openapi/keyauth
+        strip_path: true
+    plugins:
+      - name: key-auth
+        config:
+          key_names:
+            - apikey
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 1
+      - name: prometheus
+        config:
+          status_code_metrics: true
+          bandwidth_metrics: true
+          latency_metrics: true
+      - name: cors
+        config:
+          origins: ["*"]
+          methods: [GET, POST, OPTIONS]
+          headers: [Authorization, apikey, Content-Type]
+          credentials: false
+          max_age: 3600
+
+  # Route แยกสำหรับทดสอบ rate limiting โดยเฉพาะ (ไม่ปน budget กับ route หลัก)
+  - name: buyer-ratelimit-api
+    url: http://buyer-api:3000
+    routes:
+      - name: buyer-ratelimit-route
+        paths:
+          - /openapi/ratelimit
+        strip_path: true
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: 3
+          policy: local
+
+  # Custom plugin oidc-central — OIDC validation ครบที่ gateway (JWKS + aud + scope)
+  # สิ่งที่ jwt plugin ตัว OSS ทำไม่ได้ — เขียนเองด้วย Lua PDK (kong/custom/kong/plugins/oidc-central)
+  - name: buyer-oidc-api
+    url: http://buyer-api:3000
+    routes:
+      - name: buyer-oidc-route
+        paths:
+          - /openapi/oidc
+        strip_path: true
+    plugins:
+      - name: oidc-central
+        config:
+          issuer: http://localhost:8080/realms/central
+          jwks_url: http://keycloak:8080/realms/central/protocol/openid-connect/certs
+          audience: buyer-api
+          required_scope: orders.read
+          jwks_ttl: 300
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 1
+      - name: prometheus
+        config:
+          status_code_metrics: true
+          bandwidth_metrics: true
+          latency_metrics: true
+      - name: cors
+        config:
+          origins: ["*"]
+          methods: [GET, POST, OPTIONS]
+          headers: [Authorization, apikey, Content-Type]
+          credentials: false
+          max_age: 3600
+
+  # Custom plugin oidc-introspect — ตรวจผ่าน Keycloak introspection endpoint (RFC 7662)
+  # ปิดจุดอ่อน JWKS: token ที่ถูก revoke/disable user จะกลายเป็น inactive ทันที (มี cache TTL สั้น)
+  - name: buyer-introspect-api
+    url: http://buyer-api:3000
+    routes:
+      - name: buyer-introspect-route
+        paths:
+          - /openapi/introspect
+        strip_path: true
+    plugins:
+      - name: oidc-introspect
+        config:
+          introspection_url: http://keycloak:8080/realms/central/protocol/openid-connect/token/introspect
+          client_id: partner-001
+          client_secret: __INTROSPECT_CLIENT_SECRET__
+          cache_ttl: 10
+
+  # Portal ผ่าน Kong — จำลอง gateway เป็น single entry point ของทุก UI
+  # (production: ใช้ hostname เดียว เช่น portal.central.example + ลงทะเบียน redirect_uri ให้ตรง)
+  - name: portal-id
+    url: http://central-id:3000
+    routes:
+      - name: portal-id-route
+        paths:
+          - /portal/id
+        strip_path: true
+  - name: portal-buyer
+    url: http://buyer-api:3000
+    routes:
+      - name: portal-buyer-route
+        paths:
+          - /portal/buyer
+        strip_path: true
+  - name: portal-cis
+    url: http://cis-api:3000
+    routes:
+      - name: portal-cis-route
+        paths:
+          - /portal/cis
+        strip_path: true
+
+  # Global plugin — metrics สำหรับ monitoring (สู่ production readiness)
+
+  # Custom plugin central-apikey — Central API Key จาก ID Portal (ผูก scope ตอนออก key)
+  # Kong ถาม ID Portal /apikeys/validate ทุกครั้ง (cache TTL สั้น) — เพิ่ม/ยกเลิก key ที่ ID Portal
+  # ได้ทันทีโดยไม่ต้องแตะ config ของ Kong — contract เดียวกันสำหรับ MCP server
+  - name: buyer-apikey-api
+    url: http://buyer-api:3000
+    # strip_path: false — upstream อ่าน path เต็ม /openapi/apikey/* (controller เฉพาะของ api-key)
+    routes:
+      - name: buyer-apikey-route
+        paths:
+          - /openapi/apikey
+        strip_path: false
+    plugins:
+      - name: central-apikey
+        config:
+          validation_url: http://central-id:3000/apikeys/validate
+          read_scope: orders.read
+          write_scope: orders.write
+          gateway_secret: __GATEWAY_SECRET__
+          cache_ttl: 15
+          key_names: apikey,X-API-Key # รองรับทั้งสองชื่อ header (apikey = Kong default · X-API-Key = de facto ในวงการ)
+
+consumers:
+  # Consumer ผูกกับ client partner-001 ของ Keycloak
+  # key ของ jwt_secret ต้องตรงกับค่า iss ใน token ที่ออกโดย realm central
+  - username: partner-001
+    custom_id: partner-001
+    jwt_secrets:
+      - key: http://localhost:8080/realms/central
+        algorithm: RS256
+        rsa_public_key: |
+__PARTNER_RSA_PUBLIC_KEY__
+    keyauth_credentials:
+      - key: partner-001-demo-key

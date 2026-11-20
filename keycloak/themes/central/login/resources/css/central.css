@@ -1,0 +1,132 @@
+/* Central ID login theme (POC) — หน้า login เป็นแบรนด์ Central ID ทั้งหน้า (ไม่แสดงตัวตน Keycloak)
+   KC 26 หมายเหตุ:
+   - class login-pf อยู่ที่ div ภายใน (body class ว่าง) — target div.login-pf
+   - static files ต้องอยู่ใต้ resources/ (ไฟล์นี้: resources/css/central.css)
+   - ข้อความ/ป้ายภาษาไทย override ผ่าน messages/messages_en|th.properties */
+
+html,
+body {
+  background: linear-gradient(160deg, #1e1b4b 0%, #4f46e5 55%, #0ea5e9 100%) !important;
+  background-attachment: fixed !important;
+  font-family: 'Segoe UI', system-ui, 'Noto Sans Thai', 'Sarabun', sans-serif !important;
+}
+
+div.login-pf {
+  background: transparent !important; /* เอาพื้นดำ patternfly ออก */
+}
+
+/* ซ่อนหัวเว็บ (realm name) — โลโก้อยู่บนการ์ดแทน, ซ่อน footer ของ KC ด้วย */
+#kc-header,
+.login-pf-page-footer,
+#kc-footer {
+  display: none !important;
+}
+
+/* จัดกึ่งกลางทั้งหน้า */
+.login-pf-page {
+  display: flex !important;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh !important;
+  max-width: none !important;
+  padding: 24px !important;
+  margin: 0 !important;
+}
+
+/* โลโก้ Central ID เหนือการ์ด */
+.login-pf-page::before {
+  content: 'A';
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #22d3ee, #4f46e5);
+  color: #fff;
+  font-size: 34px;
+  font-weight: 800;
+  margin: 0 auto 18px;
+  box-shadow: 0 12px 32px rgba(30, 27, 75, 0.45);
+}
+
+/* การ์ดฟอร์ม */
+.card-pf {
+  background: #fff !important;
+  border: none !important;
+  border-radius: 18px !important;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.35) !important;
+  padding: 30px 30px 26px !important;
+  width: 100%;
+  max-width: 420px;
+  margin: 0 !important;
+}
+
+/* หัวเรื่องบนการ์ด ("ล็อกอินด้วย Central ID") */
+#kc-page-title,
+.login-pf-page-header,
+.card-pf h2 {
+  color: #0f172a !important;
+  font-size: 20px !important;
+  font-weight: 800 !important;
+  text-align: center !important;
+  margin: 0 0 20px !important;
+}
+
+/* label ของฟอร์ม */
+.login-pf label,
+.login-pf .control-label {
+  color: #475569 !important;
+  font-size: 13.5px !important;
+  font-weight: 600 !important;
+}
+
+/* ช่องกรอก */
+.login-pf .form-control {
+  border: 1.5px solid #d8dee9 !important;
+  border-radius: 10px !important;
+  height: 46px !important;
+  box-shadow: none !important;
+  font-size: 14.5px !important;
+  background: #fbfdff !important;
+  color: #0f172a !important;
+}
+.login-pf .form-control:focus {
+  border-color: #4f46e5 !important;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15) !important;
+}
+
+/* ปุ่มเข้าสู่ระบบ */
+#kc-login,
+.login-pf .btn-primary {
+  background: linear-gradient(90deg, #0ea5e9, #4f46e5) !important;
+  border: none !important;
+  border-radius: 10px !important;
+  height: 48px !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  text-transform: none !important;
+  letter-spacing: 0.2px;
+}
+#kc-login:hover,
+.login-pf .btn-primary:hover,
+.login-pf .btn-primary:focus {
+  background: linear-gradient(90deg, #0284c7, #4338ca) !important;
+}
+
+/* ข้อความแจ้งเตือน (เช่น รหัสผ่านผิด) */
+.login-pf .alert {
+  border-radius: 10px !important;
+}
+.login-pf .alert-error {
+  background: #fef2f2 !important;
+  border: 1px solid #fecaca !important;
+  color: #991b1b !important;
+}
+
+/* ลิงก์รอง */
+.login-pf a,
+.login-pf .link {
+  color: #4f46e5 !important;
+}

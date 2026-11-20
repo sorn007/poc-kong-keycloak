@@ -1,0 +1,210 @@
+# POC Central Identity — Keycloak + Kong (DB-less) + Buyer(NestJS) + CIS(Go Fiber)
+# ขั้นแรกก่อน up ครั้งแรก: bash scripts/setup-keys.sh (สร้าง signing key + realm.json/kong.yml)
+name: poc-central-identity
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: poc-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks: [central-net]
+
+  keycloak:
+    # KC 26: mapper config key เป็นเอกพจน์ (access.token.claim) และ realm ที่ import ด้วย clientScopes
+    # ต้องใส่ stock scopes (basic ฯลฯ) เอง ไม่งั้น token จะไม่มี sub — ดู docs/test-results.md §4 ข้อ 12
+    image: quay.io/keycloak/keycloak:26.3
+    container_name: poc-keycloak
+    command: ["start-dev", "--import-realm",
+              # CIBA (headless login pilot): ส่ง authentication delegation request ไปยัง
+              # "อุปกรณ์ ID" (id-device) เพื่อให้ผู้ใช้ยืนยันการเข้าสู่ระบบแบบ headless
+              "--spi-ciba-auth-channel--ciba-http-auth-channel--http-authentication-channel-uri=http://id-device:3000/ciba/delegation"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      KC_DB_USERNAME: ${POSTGRES_USER}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      # บังคับ hostname ของ frontend/token endpoint ให้เป็น localhost เสมอ
+      # เพื่อให้ claim iss = http://localhost:8080/realms/central
+      # แม้ service ใน network จะเรียกผ่าน http://keycloak:8080 (กัน iss สองค่า)
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_STRICT: "false"
+      # ใช้โดย realm import (จำลอง secret และรหัสผ่าน user ทดสอบ)
+      PARTNER_001_CLIENT_SECRET: ${PARTNER_001_CLIENT_SECRET}
+      TEST_USER_PASSWORD: ${TEST_USER_PASSWORD}
+      # secret ของ client headless-app (CIBA) — ใช้ resolve placeholder ตอน realm import
+      CIBA_CLIENT_SECRET: ${CIBA_CLIENT_SECRET}
+      # secret ของ client cis-web (confidential — ใช้กับ Token Exchange ของ STT)
+      CIS_CLIENT_SECRET: ${CIS_CLIENT_SECRET}
+      # secret ของ client central-id-portal (confidential — Token Exchange ของ STT/SSO)
+      IDPORTAL_CLIENT_SECRET: ${IDPORTAL_CLIENT_SECRET}
+      GATEWAY_SECRET: ${GATEWAY_SECRET}
+      # ชี้ themes dir ของ folder theme provider ให้ชัด (KC 26 quarkus)
+      KC_SPI_THEME_FOLDER_DIR: /opt/keycloak/themes
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import
+      - ./keycloak/themes:/opt/keycloak/themes
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [central-net]
+
+  kong:
+    image: kong:3.9
+    container_name: poc-kong
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /usr/local/share/kong/kong.yml
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_LOG_LEVEL: notice
+      # custom plugin oidc-central (ตรวจ aud/scope ที่ gateway — สิ่งที่ jwt plugin OSS ข้าม)
+      KONG_PLUGINS: "bundled,oidc-central,oidc-introspect,central-apikey"
+      KONG_LUA_PACKAGE_PATH: "/usr/local/custom/?.lua;;"
+      KONG_DNS_ORDER: "A"
+      # status API — ค่า per-request metrics (kong_http_requests_total) อยู่ที่ :8100/metrics
+      KONG_STATUS_LISTEN: "0.0.0.0:8100"
+      # default ของ Kong คือ bind admin ที่ 127.0.0.1 ใน container — host forward เข้าไม่ถึง
+      KONG_ADMIN_LISTEN: "0.0.0.0:8001"
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+      - "8100:8100"
+    volumes:
+      - ./kong/kong.yml:/usr/local/share/kong/kong.yml:ro
+      - ./kong/custom:/usr/local/custom:ro
+    networks: [central-net]
+
+  buyer-api:
+    build: ./services/buyer-api
+    container_name: poc-buyer-api
+    environment:
+      PORT: "3000"
+      DEV_MODE: "1" # เปิด endpoint /dev/* สำหรับ mint legacy token — ห้ามใช้ production
+      KEYCLOAK_ISSUER: http://localhost:8080/realms/central
+      KEYCLOAK_INTERNAL_BASE: http://keycloak:8080
+      APP_FRONT_URL: http://localhost:3010
+      LEGACY_BUYER_JWT_SECRET: ${LEGACY_BUYER_JWT_SECRET}
+      # gateway-trust — shared secret กับ Kong (plugin central-apikey แนบมาเมื่อตรวจ key แล้ว)
+      GATEWAY_SECRET: ${GATEWAY_SECRET}
+      # ID Portal (STT broker) — server-to-server redeem ของ Session Transfer
+      IDPORTAL_INTERNAL_BASE: http://central-id:3000
+    ports:
+      - "3010:3000"
+    depends_on:
+      - keycloak
+    networks: [central-net]
+
+  # แอป Central ID (บัญชีกลาง) — OIDC client หนึ่งของ Keycloak (central-id-portal)
+  central-id:
+    build: ./services/central-id
+    container_name: poc-central-id
+    environment:
+      PORT: "3000"
+      KEYCLOAK_ISSUER: http://localhost:8080/realms/central
+      KEYCLOAK_INTERNAL_BASE: http://keycloak:8080
+      APP_FRONT_URL: http://localhost:3000
+      # secrets ของ confidential client — ใช้โดย broker ตอน renew token ใน SSO ticket
+      FINTECH_CLIENT_SECRET: ${FINTECH_CLIENT_SECRET}
+      CIS_CLIENT_SECRET: ${CIS_CLIENT_SECRET}
+      IDPORTAL_CLIENT_SECRET: ${IDPORTAL_CLIENT_SECRET}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - keycloak
+    networks: [central-net]
+
+  # Headless Demo (CD = Consumption Device) — แอปที่ทำหน้า login ของตัวเอง
+  # ขออนุญาตเข้าสู่ระบบผ่าน CIBA (ext/ciba/auth) แล้ว poll token endpoint
+  headless-demo:
+    build: ./services/headless-demo
+    container_name: poc-headless-demo
+    environment:
+      PORT: "3000"
+      KEYCLOAK_ISSUER: http://localhost:8080/realms/central
+      KEYCLOAK_INTERNAL_BASE: http://keycloak:8080
+      APP_FRONT_URL: http://localhost:3030
+      CIBA_CLIENT_ID: headless-app
+      CIBA_CLIENT_SECRET: ${CIBA_CLIENT_SECRET}
+      BUYER_API_BASE: http://buyer-api:3000
+    ports:
+      - "3030:3000"
+    depends_on:
+      - keycloak
+    networks: [central-net]
+
+  # ID Device (AD = Authentication Device) — จำลอง "แอป ID บนมือถือ"
+  # รับ authentication delegation request จาก Keycloak + หน้าอนุมัติ/ปฏิเสธ
+  id-device:
+    build: ./services/id-device
+    container_name: poc-id-device
+    environment:
+      PORT: "3000"
+      KEYCLOAK_ISSUER: http://localhost:8080/realms/central
+      KEYCLOAK_INTERNAL_BASE: http://keycloak:8080
+      APP_FRONT_URL: http://localhost:3040
+    ports:
+      - "3040:3000"
+    depends_on:
+      - keycloak
+    networks: [central-net]
+
+  # Fintech App (Embedded Login exception demo) — มีฟอร์ม user/pass ของตัวเอง
+  # backend ยิง Direct Grant ไป Keycloak server-to-server (credentials ไม่ผ่าน browser)
+  fintech-web:
+    build: ./services/fintech-web
+    container_name: poc-fintech-web
+    environment:
+      PORT: "3000"
+      KEYCLOAK_INTERNAL_BASE: http://keycloak:8080
+      REALM: central
+      FINTECH_CLIENT_ID: fintech-web
+      FINTECH_CLIENT_SECRET: ${FINTECH_CLIENT_SECRET}
+      BUYER_API_BASE: http://buyer-api:3000
+      APP_FRONT_URL: http://localhost:3050
+    ports:
+      - "3050:3000"
+    depends_on:
+      - keycloak
+    networks: [central-net]
+
+  cis-api:
+    build: ./services/cis-api
+    container_name: poc-cis-api
+    environment:
+      PORT: "3000"
+      DEV_MODE: "1" # เปิด endpoint /dev/* สำหรับ mint legacy token — ห้ามใช้ production
+      KEYCLOAK_ISSUER: http://localhost:8080/realms/central
+      KEYCLOAK_INTERNAL_BASE: http://keycloak:8080
+      APP_FRONT_URL: http://localhost:3020
+      LEGACY_CIS_JWT_SECRET: ${LEGACY_CIS_JWT_SECRET}
+      # cis-web เป็น confidential client — secret ใช้กับ token endpoint (AC flow + Token Exchange)
+      CIS_CLIENT_SECRET: ${CIS_CLIENT_SECRET}
+      # ID Portal (STT broker) — server-to-server redeem + Token Exchange ของ Session Transfer
+      IDPORTAL_INTERNAL_BASE: http://central-id:3000
+    ports:
+      - "3020:3000"
+    depends_on:
+      - keycloak
+    networks: [central-net]
+
+volumes:
+  pgdata:
+
+networks:
+  central-net:
