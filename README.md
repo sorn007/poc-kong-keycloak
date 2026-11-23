@@ -4,7 +4,7 @@ A Proof of Concept for turning a Central ID into a full **Central Identity Provi
 
 > UI language: every app supports **English / Thai** switching (button in the page header, or `?lang=en|th`; persisted in a cookie). The Keycloak login pages are bilingual too. Documentation: this file (English, default) and [README-TH.md](README-TH.md) (Thai).
 >
-> Original problem statement (Thai): [rootcase.md](rootcase.md)
+> Original problem statement (Thai): [rootcase.md](rootcase.md) · 📐 **Full architecture diagrams (Mermaid)**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ---
 

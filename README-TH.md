@@ -2,7 +2,7 @@
 
 Proof of Concept สำหรับยกระดับ Central ID ให้เป็น **Central Identity Provider** ที่ควบคุม Token, Session และสิทธิ์ของทุกระบบ (Buyer, CIS, Open API) จากจุดเดียว โดยใช้ **Keycloak (Free/Open Source)** เป็น Authorization Server และ **Kong Gateway (OSS)** เป็น API Gateway
 
-> เอกสารอ้างอิงปัญหาเดิม: [rootcase.md](rootcase.md) · 🇬🇧 English version (default): [README.md](README.md) · 🌐 UI สลับภาษา EN/ไทย ได้ที่หัวทุกหน้า (หรือ ?lang=en)
+> เอกสารอ้างอิงปัญหาเดิม: [rootcase.md](rootcase.md) · 📐 **ภาพรวมสถาปัตยกรรม (Mermaid)**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · 🇬🇧 English version (default): [README.md](README.md) · 🌐 UI สลับภาษา EN/ไทย ได้ที่หัวทุกหน้า (หรือ ?lang=en)
 
 ---
 
