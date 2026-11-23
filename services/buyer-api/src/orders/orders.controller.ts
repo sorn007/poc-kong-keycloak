@@ -15,6 +15,7 @@ import { DualAuthGuard } from '../auth/dual-auth.guard';
 import { LegacyAuthGuard } from '../auth/legacy-auth.guard';
 import { RequireScope, ScopeGuard } from '../auth/scope.guard';
 import { page, readSession, toastScript } from '../ui';
+import { clearSsoCookies, isTicketAlive } from '../auth/sso-guard';
 import { langOf, t } from '../i18n';
 
 @Controller()
@@ -74,9 +75,22 @@ export class OrdersController {
   // (cookie → Authorization header ผ่าน middleware ใน main.ts — จำลอง BFF, POC only)
   @Get('orders/page')
   @Header('Content-Type', 'text/html; charset=utf-8')
-  page(@Req() req: Request, @Res() res: Response) {
+  async page(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const lang = langOf(req, res);
     const s = readSession(req);
+
+    // Logout กลาง propagate — session ผูกกับตั๋ว SSO: ตั๋วตาย → เคลียร์ + กลับ landing
+    // (เพิ่มความสม่ำเสมอกับหน้า Home — ทุกหน้า page-render ตรวจ liveness ของตั๋ว)
+    console.log('[liveness-debug] sso_bound=', req.cookies?.['sso_bound']?.slice(0, 12));
+    if (s && req.cookies?.['sso_bound']) {
+      const alive = await isTicketAlive(req.cookies['sso_bound']);
+      console.log('[liveness-debug] alive=', alive);
+      if (!alive) {
+        clearSsoCookies(res);
+        return res.redirect('/auth/login');
+      }
+    }
+
     const body = `<div class="card">
   <h2>Orders <span class="sub" id="who"></span></h2>
   <p class="sub">${t(lang, 'ข้อมูลจาก', 'Data from')} <code>GET /orders</code> — ${t(lang, 'Guard ตรวจ central token (JWKS) + scope', 'the Guard verifies the central token (JWKS) + scope')} <code>orders.read</code> ${t(lang, 'ทุกครั้ง', 'every time')}</p>

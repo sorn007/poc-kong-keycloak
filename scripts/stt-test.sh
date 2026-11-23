@@ -81,6 +81,12 @@ curl -s -c "$JARC" -b "$JARC" -L -o /tmp/stt-cis.html -w "%{http_code}" "$CIS/au
 grep -q "โอน session สำเร็จ" /tmp/stt-cis.html && check "CIS เปิดด้วย STT -> exchange + session (ไม่กรอกรหัสผ่าน)" "yes" "yes" || { check "CIS STT" "yes" "no ($(head -c 120 /tmp/stt-cis.html | tr -d '\n'))"; }
 curl -s -b "$JARC" -c "$JARC" -o /tmp/stt-cis-home.html "$CIS/"
 grep -q "ล็อกอินผ่าน ID อยู่" /tmp/stt-cis-home.html && check "session ที่ได้ใช้ได้จริง (CIS home ยืนยัน)" "yes" "yes" || check "CIS home" "yes" "no"
+
+# หลักฐาน sub-preservation: sub ของ token หลัง Exchange == sub ของ subject_token (user เดิม)
+SUB_SRC="$(echo "$BRIDGE_AT" | cut -d. -f2 | tr '_-' '/+' | awk '{l=length($0)%4; printf "%s", $0; if(l==2)print "=="; if(l==3)print "="}' | base64 -d 2>/dev/null | jq -r '.sub')"
+CIS_TOK="$(grep cis_session "$JARC" | awk '{print $NF}')"
+SUB_DST="$(echo "$CIS_TOK" | cut -d. -f2 | tr '_-' '/+' | awk '{l=length($0)%4; printf "%s", $0; if(l==2)print "=="; if(l==3)print "="}' | base64 -d 2>/dev/null | jq -r '.sub')"
+check "sub คงเดิมหลัง Token Exchange (source == dest)" "yes" "$([ -n "$SUB_SRC" ] && [ "$SUB_SRC" = "$SUB_DST" ] && echo yes || echo no)"
 PROJ=$(curl -s -b "$JARC" -o /tmp/stt-cis-proj.json -w "%{http_code}" "$CIS/projects")
 check "พิสูจน์ token ใหม่ aud=cis-api: GET /projects -> 200 (CIS Guard ผ่าน)" "200" "$PROJ"
 

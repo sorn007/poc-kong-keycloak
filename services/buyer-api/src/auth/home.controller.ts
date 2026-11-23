@@ -3,27 +3,10 @@ import type { Request, Response } from 'express';
 import { verifyCentralToken } from './verify-central';
 import { page, readSession, sessionCards, toastScript } from '../ui';
 import { langOf, t } from '../i18n';
+import { clearSsoCookies, isTicketAlive } from './sso-guard';
 
 const broker =
   process.env.IDPORTAL_INTERNAL_BASE ?? 'http://central-id:3000';
-
-// isTicketAlive — ตรวจกับ ID กลางว่า session ที่ผูกกับตั๋วยังมีชีวิต (logout กลาง propagate)
-async function isTicketAlive(ticket: string): Promise<boolean> {
-  if (!ticket) return true;
-  try {
-    const r = await fetch(`${broker}/sso/check`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ ticket }),
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!r.ok) return true; // ตรวจไม่ได้ → fail-open
-    const out = (await r.json()) as { alive?: boolean };
-    return out.alive !== false;
-  } catch {
-    return true;
-  }
-}
 
 // Buyer Portal — หน้าจอจำลองตาม flow rootcase:
 // [1] ล็อกอิน ID (Keycloak login) → [2] Buyer Portal → [3] CIS Portal (SSO) → [4] Logout กลาง

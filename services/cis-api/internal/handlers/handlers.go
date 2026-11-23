@@ -186,6 +186,19 @@ func ProjectsPage(k auth.Keyfunc, cfg auth.Config) fiber.Handler {
 		lang := web.LangOf(c)
 		var s *web.Session
 		if token := c.Cookies("cis_session"); token != "" {
+			// Logout กลาง propagate — session ผูกกับตั๋ว SSO: ตั๋วตาย → เคลียร์ session
+			// (เพิ่มความสม่ำเสมอกับหน้า Home — ตรวจ liveness ทุกหน้า page ที่ render)
+			if c.Cookies("sso_bound") != "" && !oidc.TicketAlive(c.Cookies("sso_bound")) {
+				clearLocal := func(name string) {
+					c.Cookie(&fiber.Cookie{Name: name, Value: "", Path: "/", Expires: time.Now().Add(-time.Hour), MaxAge: -1, HTTPOnly: true, SameSite: "Lax"})
+				}
+				clearLocal("cis_session")
+				clearLocal("cis_id_token")
+				clearLocal("sso_bound")
+				clearLocal("sso_try_cis")
+				clearLocal("allkons_sso")
+				return c.Redirect("/auth/login", fiber.StatusFound)
+			}
 			if claims, err := auth.VerifyCentral(k, cfg, token); err == nil {
 				s = sessionFromClaims(claims)
 			}

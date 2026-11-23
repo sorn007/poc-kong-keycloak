@@ -114,7 +114,7 @@ func main() {
 	app.Get("/apikeys", handlers.ApiKeysPage(jwks, cfg, apiKeyStore))
 	app.Post("/apikeys/create", handlers.CreateAPIKey(jwks, cfg, apiKeyStore))
 	app.Get("/apikeys/list", handlers.ListAPIKeys(jwks, cfg, apiKeyStore))
-	app.Post("/apikeys/revoke", handlers.RevokeAPIKey(jwks, cfg, apiKeyStore))
+	app.Post("/apikeys/revoke", handlers.RevokeAPIKey(jwks, cfg, apiKeyStore, ssoStore))
 	app.Post("/apikeys/validate", handlers.ValidateAPIKey(apiKeyStore))
 
 	log.Printf("central-id portal listening :%s — audience=%s", port, cfg.Audience)

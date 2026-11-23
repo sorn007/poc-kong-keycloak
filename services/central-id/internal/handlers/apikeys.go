@@ -15,6 +15,7 @@ import (
 
 	"central/central-id/internal/apikeys"
 	"central/central-id/internal/auth"
+	"central/central-id/internal/sso"
 	"central/central-id/internal/web"
 )
 
@@ -234,18 +235,24 @@ func ListAPIKeys(k auth.Keyfunc, cfg auth.Config, store *apikeys.Store) fiber.Ha
 	}
 }
 
-// RevokeAPIKey — ยกเลิก key (เฉพาะเจ้าของ)
-func RevokeAPIKey(k auth.Keyfunc, cfg auth.Config, store *apikeys.Store) fiber.Handler {
+// RevokeAPIKey — ยกเลิก key (เฉพาะเจ้าของ) — ตรวจ "ทั้งสอง registry":
+// 1) apiKeyStore (Central API Key)  2) ssoStore (SSO Ticket)
+// เพราะ endpoint เดียวกันถูกใช้ revoke ได้ทั้ง credential สองประเภท — id ที่ไม่เจอใน store
+// ใด store หนึ่งอาจเป็นของอีก store (ผู้ใช้/script ไม่จำเป็นต้องรู้ว่า id นั้นเป็นชนิดไหน)
+func RevokeAPIKey(k auth.Keyfunc, cfg auth.Config, store *apikeys.Store, ssoStore *sso.Store) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		owner := ownerFromRequest(c, k, cfg)
 		if owner == "" {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
 		}
 		id := c.FormValue("id")
-		if !store.Revoke(owner, id) {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "key_not_found_or_already_revoked"})
+		if store.Revoke(owner, id) {
+			return c.JSON(fiber.Map{"revoked": true, "key_id": id, "type": "api_key"})
 		}
-		return c.JSON(fiber.Map{"revoked": true, "key_id": id})
+		if user, ok := ssoStore.Revoke(id); ok {
+			return c.JSON(fiber.Map{"revoked": true, "ticket_id": id, "type": "sso_ticket", "username": user})
+		}
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "key_not_found_or_already_revoked"})
 	}
 }
 

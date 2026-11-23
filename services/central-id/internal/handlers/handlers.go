@@ -318,6 +318,10 @@ func jwtPayloadField(token, field string) string {
 	if v, ok := m[field].(string); ok {
 		return v
 	}
+	// JSON number decode เป็น float64 — format ให้เป็นเลขจำนวนเต็ม (fmt.Sprint จะได้ e+09)
+	if f, ok := m[field].(float64); ok {
+		return strconv.FormatFloat(f, 'f', -1, 64)
+	}
 	return ""
 }
 
