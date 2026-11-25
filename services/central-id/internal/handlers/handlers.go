@@ -216,7 +216,7 @@ func send(c *fiber.Ctx, title, body string, step, done int, s *web.Session, page
 // CreateSTT — mobile ส่ง Bearer token มา verify (RS256/iss/exp ไม่จำกัด aud เพราะ mobile
 // อาจถือ token ของ client ใดก็ได้ใน realm) + form field `dest` (client id ของปลายทาง — REQUIRED)
 // แล้วออก one-time code ที่ผูกกับปลายทางนั้นให้
-func CreateSTT(sttStore *stt.Store, k auth.Keyfunc, issuer string) fiber.Handler {
+func CreateSTT(sttStore stt.CodeStore, k auth.Keyfunc, issuer string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		authz := c.Get(fiber.HeaderAuthorization)
 		if !strings.HasPrefix(authz, "Bearer ") {
@@ -253,7 +253,7 @@ func CreateSTT(sttStore *stt.Store, k auth.Keyfunc, issuer string) fiber.Handler
 
 // RedeemSTT — แลก one-time code (server-to-server จากแอปปลายทาง) -> username + access token
 // ต้องส่ง `dest` (client id ของตัวเอง) — code ออกให้ปลายทางอื่นถูกปฏิเสธ (กัน interception ข้ามแอป)
-func RedeemSTT(sttStore *stt.Store) fiber.Handler {
+func RedeemSTT(sttStore stt.CodeStore) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		code := c.FormValue("code")
 		if code == "" {
@@ -327,7 +327,7 @@ func jwtPayloadField(token, field string) string {
 
 // CreateSSOTicket — แอปที่ login สำเร็จ (มี Bearer token) ขอตั๋ว SSO ให้ browser
 // form: refresh_token (ไว้ต่ออายุ), client_id (client ต้นทาง — ใช้ตอน refresh)
-func CreateSSOTicket(ssoStore *sso.Store, k auth.Keyfunc, issuer string) fiber.Handler {
+func CreateSSOTicket(ssoStore sso.TicketStore, k auth.Keyfunc, issuer string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		authz := c.Get(fiber.HeaderAuthorization)
 		if !strings.HasPrefix(authz, "Bearer ") {
@@ -362,7 +362,7 @@ func CreateSSOTicket(ssoStore *sso.Store, k auth.Keyfunc, issuer string) fiber.H
 // RedeemTicketFor — แลกตั๋ว SSO เป็น token + renew อัตโนมัติถ้าใกล้หมดอายุ (core ที่ทั้ง HTTP
 // handler และ ID Portal เองใช้ — portal เป็นทั้ง broker และปลายทาง) — ตั๋ว reusable ไม่ consume
 // คืน (token, aud, issuedFor, สถานะ "ok" | "dead" (ตั๋วไม่มี/หมดอายุ/renew ไม่ได้) | "error" (ติดต่อ KC ไม่ได้))
-func RedeemTicketFor(ssoStore *sso.Store, k auth.Keyfunc, issuer, internalBase, realm string, clientSecrets map[string]string, ticket, dest string) (string, []string, string, string) {
+func RedeemTicketFor(ssoStore sso.TicketStore, k auth.Keyfunc, issuer, internalBase, realm string, clientSecrets map[string]string, ticket, dest string) (string, []string, string, string) {
 	username, accessToken, aud, issuedFor, refreshToken, clientID, err := ssoStore.Get(ticket)
 	if err != nil {
 		log.Printf("sso redeem failed: %v (dest=%s)", err, dest)
@@ -421,7 +421,7 @@ func RedeemTicketFor(ssoStore *sso.Store, k auth.Keyfunc, issuer, internalBase, 
 	return accessToken, aud, issuedFor, "ok"
 }
 
-func RedeemSSOTicket(ssoStore *sso.Store, k auth.Keyfunc, issuer string, internalBase, realm string, clientSecrets map[string]string) fiber.Handler {
+func RedeemSSOTicket(ssoStore sso.TicketStore, k auth.Keyfunc, issuer string, internalBase, realm string, clientSecrets map[string]string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		ticket := strings.Clone(c.FormValue("ticket"))
 		dest := c.FormValue("dest")
@@ -446,7 +446,7 @@ func RedeemSSOTicket(ssoStore *sso.Store, k auth.Keyfunc, issuer string, interna
 }
 
 // RevokeSSOTicket — ยกเลิกตั๋ว (logout กลาง) — ต้องมี Bearer token ของ realm นี้ (ผู้ถือ session จริง)
-func RevokeSSOTicket(ssoStore *sso.Store, k auth.Keyfunc, issuer string) fiber.Handler {
+func RevokeSSOTicket(ssoStore sso.TicketStore, k auth.Keyfunc, issuer string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		authz := c.Get(fiber.HeaderAuthorization)
 		if !strings.HasPrefix(authz, "Bearer ") {
@@ -468,7 +468,7 @@ func RevokeSSOTicket(ssoStore *sso.Store, k auth.Keyfunc, issuer string) fiber.H
 
 // CheckSSOTicket — ปลายทางเช็คว่า session ที่ผูกกับตั๋วยังมีชีวิตอยู่ไหม (propagate logout กลางแบบเรียลไทม์)
 // ตั๋วถูก revoke/logout-all แล้ว → alive:false → ปลายทางจะเคลียร์ session ของตัวเองทันที
-func CheckSSOTicket(ssoStore *sso.Store) fiber.Handler {
+func CheckSSOTicket(ssoStore sso.TicketStore) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		ticket := c.FormValue("ticket")
 		if ticket == "" {
@@ -482,7 +482,7 @@ func CheckSSOTicket(ssoStore *sso.Store) fiber.Handler {
 // LogoutAllSSO — logout กลางแบบ global: ยกเลิก "ทุก" ตั๋ว SSO ของ ID กลาง
 // (เรียกโดยแอปที่กด Logout กลาง — ผูก Bearer token ของ session เพื่อพิสูจน์ตัวตน)
 // ผลลัพธ์: แอปทุกตัวที่ session ผูกกับตั๋วจะถูกบังคับ logout ตั้งแต่ request หน้าถัดไป
-func LogoutAllSSO(ssoStore *sso.Store, k auth.Keyfunc, issuer string) fiber.Handler {
+func LogoutAllSSO(ssoStore sso.TicketStore, k auth.Keyfunc, issuer string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		authz := c.Get(fiber.HeaderAuthorization)
 		if !strings.HasPrefix(authz, "Bearer ") {

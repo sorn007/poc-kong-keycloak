@@ -1,24 +1,24 @@
 # Security Audit — ตรวจ Source Code ตามคำถามของ Reviewer (4 จุด)
 
 > ตอบคำถามจาก code review: "Design Intent เข้าใจชัดแล้ว — Implementation ทำได้ตรงตาม Design หรือไม่"
-> วิธีตอบ: **อ่านจากโค้ดจริง + พิสูจน์ด้วย test ที่รันได้** (ทุกข้ออ้างอิง file:line) — audit เมื่อ 2026-11-23
-> ผลรวม: **ทุกคำถามมี implementation จริง** · พบช่องโหว่/ช่องว่าง 3 จุด → แก้ใน audit นี้ 2 จุด + บันทึกยอมรับ 1 จุด · test รวมเพิ่ม 3 checks (198 → 201)
+> วิธีตอบ: **อ่านจากโค้ดจริง + พิสูจน์ด้วย test ที่รันได้** (ทุกข้ออ้างอิง file:line) — audit เมื่อ 2026-11-23 · **อัปเดต 2026-11-25: gap Q1 (restart = kick ทุกคน) ปิดแล้วด้วย store backend Redis — พิสูจน์ restart จริงด้านล่าง**
+> ผลรวม: **ทุกคำถามมี implementation จริง** · พบช่องโหว่/ช่องว่าง 3 จุด → แก้ใน audit นี้ 2 จุด + บันทึกยอมรับ 1 จุด (ยอมรับนั้นปิดเพิ่มใน 2026-11-25)
 
 ---
 
 ## Q1 — Ticket Broker: Ticket เก็บที่ไหน · Atomic Revocation · Restart แล้วเป็นอย่างไร
 
-**ไฟล์:** `services/central-id/internal/sso/sso.go`
+**ไฟล์:** `services/central-id/internal/sso/sso.go` (memory) · `internal/sso/redis.go` (Redis)
 
 | คำถาม | คำตอบจากโค้ด | หลักฐาน |
 | ------ | ------------- | ------- |
-| เก็บที่ไหน | **in-memory map** ใน process ของ ID Portal (`Store.byID/byKey/byUser` + `sync.Mutex`) | sso.go:31-36 |
-| Atomic Revocation | ✅ **atomic ภายใน single process** — `Revoke`/`RevokeAll` ครองด้วย mutex เดียวกับ read; ตั๋วเดียว: `Revoke(owner,id)` · global: `RevokeAll()` (logout กลาง) | sso.go:113-131 |
-| Validate consume ไหม | **ไม่ consume** (reusable ตลอด TTL 30 นาที) — `Get` อ่านอย่างเดียว + stamp `LastUsed` | sso.go:135-148 |
-| Restart ID Portal | **ตั๋วหายทั้งหมด** → `/sso/check` ตอบ `alive:false` → ทุก session ที่ผูกตั๋ว **fail-closed** (บังคับ login ใหม่ — ปลอดภัย แต่ kick ผู้ใช้) | พฤติกรรม map ว่าง; ยืนยันผ่าน stt-test หลัง restart stack |
-| Refresh token ในตั๋ว | เก็บ **plaintext refresh token** ใน memory (เพื่อ renew) — POC ยอมรับ; **production ต้องเปลี่ยน** | ดูช่องว่างด้านล่าง |
+| เก็บที่ไหน | **2 backends เลือกด้วย env `STORE_BACKEND`**: memory = in-process map (`Store.byID/byKey/byUser` + `sync.Mutex`, default ของ POC) · redis = `RedisTicketStore` (SETEX 30 นาที + AOF, compose service `redis:7-alpine`) — เลือกผ่าน factory `NewTicketStoreFor` | sso.go:31-36 · store.go:8-15 · factory.go · redis.go:43-58 |
+| Atomic Revocation | ✅ memory: **atomic ภายใน single process** (mutex เดียวกับ read) · redis: SET/DEL เป็น atomic per-key — ตั๋วเดียว: `Revoke` (ตั้ง flag + KeepTTL) · global: `RevokeAll()` (logout กลาง) | sso.go:113-131 · redis.go:95-124 |
+| Validate consume ไหม | **ไม่ consume** (reusable ตลอด TTL 30 นาที) — `Get`/`Check` อ่านอย่างเดียว | sso.go:135-148 |
+| Restart ID Portal | **ขึ้นกับ backend**: memory = ตั๋วหายหมด → `/sso/check` `alive:false` → ทุก session fail-closed (kick ผู้ใช้) · **redis = ตั๋วรอด** — พิสูจน์จริง 2026-11-25: ออกตั๋ว → `docker compose restart central-id` → alive:true · restart Redis เอง (AOF) → alive:true | ทดสอบ E2E ใน audit นี้; keys `central:sso:ticket:*` ใน redis-cli |
+| Refresh token ในตั๋ว | เก็บ plaintext (memory และ redis entry JSON) เพื่อ renew — **production ต้องเก็บ hash** | ดูช่องว่างด้านล่าง |
 
-**ช่องว่างที่ยอมรับ (production gaps):** restart = kick ทุกคน (availability) · in-memory ไม่ทน HA · refresh token อยู่ใน memory ไม่เข้ารหัส → **production ต้องใช้ Redis (TLS + persistence + replication) เก็บ hash ของ token** ตามที่ ADR-005 ระบุ
+**ช่องว่างที่แก้แล้ว (2026-11-25):** restart = kick ทุกคน → **ปิดด้วย `STORE_BACKEND=redis`** (ทน restart + หลาย replica ใช้ state ร่วมกัน) — sweep 162/162 checks ผ่านบน Redis · **คงเหลือ production gaps:** Redis ตัวเดี่ยวยังเป็น SPoF (production: Sentinel/Cluster + TLS + ACL) · refresh token plaintext → เก็บ hash + TTL ตาม ADR-005
 
 ---
 
@@ -75,10 +75,13 @@
 | 1 | CIS `ProjectsPage` — เพิ่ม ticket liveness check (ตั๋วตาย → เคลียร์ session + redirect login) ให้สม่ำเสมอกับหน้า Home | `cis-api/internal/handlers/handlers.go` |
 | 2 | Buyer — ดึง `isTicketAlive`/`clearSsoCookies` ออกเป็น `auth/sso-guard.ts` (shared) + เพิ่ม check ใน `/orders/page` | `buyer-api/src/auth/sso-guard.ts` (ใหม่), `home.controller.ts`, `orders.controller.ts` |
 | 3 | `stt-test.sh` — เพิ่ม **sub-preservation check** (sub ของ token หลัง exchange == sub ของ subject token) ปิดคำถาม Q4 | `scripts/stt-test.sh` |
-| 4 | ยอมรับ + บันทึกช่องว่าง production: ticket store in-memory (restart = kick ทุกคน), refresh token plaintext in memory, fail-open บน broker timeout, Kong cache 15s vs MCP 0s (SLA ต่างกัน) | ADR-005 + หัวข้อข้างบน |
+| 4 | **dual-store revoke** — `/apikeys/revoke` ตรวจทั้ง apiKeyStore และ ssoStore (เดิม revoke SSO ticket ได้ 404) | `central-id/internal/handlers/apikeys.go` |
+| 5 | **Store backend Redis (2026-11-25)** — SSO ticket/API key/STT code เป็น interface 2 backends (`STORE_BACKEND=redis|memory`) + service redis:7-alpine (AOF) — ปิด gap "restart = kick ทุกคน" พร้อมพิสูจน์ restart จริง | `central-id/internal/{sso,apikeys,stt}/{store,redis,factory}.go`, `main.go`, `docker-compose.yml`, `.env.example` |
+| 6 | **แก้ cookie ชื่อเก่าค้าง** — `clearSsoCookies` (buyer) และ `clearLocal` (CIS ProjectsPage) เคลียร์ `allkons_sso` (ชื่อเดิม) → แก้เป็น `central_sso` (ชื่อจริงปัจจุบัน) | `buyer-api/src/auth/sso-guard.ts`, `cis-api/internal/handlers/handlers.go` |
+| 7 | ยอมรับ + บันทึกช่องว่าง production ที่เหลือ: refresh token plaintext, fail-open บน broker timeout, Kong cache 15s vs MCP 0s (SLA ต่างกัน), Redis ตัวเดี่ยว (ต้อง HA/TLS ก่อน prod) | ADR-005 + SPoF-ANALYSIS §4.2 + หัวข้อข้างบน |
 
-## การทดสอบหลังแก้ (สรุป)
+## การทดสอบหลังแก้ (สรุป — 2026-11-25 บน store backend Redis)
 
-- `stt-test.sh` — **34/34 PASS** (รวม sub-preservation + revoke-aware checks)
-- `openapi-test.sh` — **31/31 PASS** (รวม central-apikey + introspect ครบ)
-- `sso-test.sh` — **10/10** · CIS ProjectsPage หลังเพิ่ม check ยัง render และ redirect ถูกต้อง
+- sweep ทุก suite: **162/162 PASS** — `sso-test` 10 · `stt-test` **34** (รวม sub-preservation) · `openapi-test` **31** (รวม central-apikey) · `mcp-test` **12** · smoke 14+12 · revocation 10 · dual-validation 6 · mobile 12 · CIBA 16 · fintech 5
+- **พิสูจน์ restart** (Q1): ออกตั๋ว → restart central-id → `/sso/check` alive:true → restart Redis (AOF) → alive:true
+- CIS ProjectsPage หลังเพิ่ม check ยัง render และ redirect ถูกต้อง (sso-test + ทดสอบ revoke propagate)

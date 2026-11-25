@@ -97,13 +97,13 @@
 
 ### 4.3 ลำดับการทำ (roadmap)
 
-| Phase | งาน | ผลลัพธ์ |
-| ----- | --- | ------ |
-| P1 | เพิ่ม `redis:7-alpine` ใน compose + Go client (`go-redis/v9`) + abstraction `Store` interface (swap ได้ระหว่าง memory/redis ด้วย env `STORE_BACKEND=redis`) | ID Portal restart ไม่ kick ผู้ใช้ · HA พร้อม scale |
-| P2 | ย้าย 4 store ของ ID Portal ตามตารางข้างบน (interface เดิม — handler ไม่ต้องแก้) | Q1 ปิด |
-| P3 | Kong หลาย node (DB-less, config เดียวกัน) หลัง LB | gateway HA |
-| P4 | Keycloak หลาย node + Postgres HA (Patroni/RDS) | แก้ SPOF อันดับ 1-2 |
-| P5 | Buyer/CIS หลาย replica (stateless แล้วหลังย้าย PKCE) | full HA |
+| Phase | งาน | ผลลัพธ์ | สถานะ |
+| ----- | --- | ------ | ------ |
+| P1 | เพิ่ม `redis:7-alpine` ใน compose + Go client (`go-redis/v9`) + abstraction `Store` interface (swap ได้ระหว่าง memory/redis ด้วย env `STORE_BACKEND=redis`) | ID Portal restart ไม่ kick ผู้ใช้ · HA พร้อม scale | ✅ **เสร็จ 2026-11-25** — 3 store (SSO ticket/API key/STT) + พิสูจน์ restart central-id และ restart Redis (AOF) ตั๋วยัง alive · sweep 162/162 |
+| P2 | ย้าย store ที่เหลือของ ID Portal (PKCE/session ถ้ามีเพิ่ม) ตามตาราง §4.2 (interface เดิม — handler ไม่ต้องแก้) | stateless จริง | ⬜ |
+| P3 | Kong หลาย node (DB-less, config เดียวกัน) หลัง LB | gateway HA | ⬜ |
+| P4 | Keycloak หลาย node + Postgres HA (Patroni/RDS) | แก้ SPOF อันดับ 1-2 | ⬜ |
+| P5 | Buyer/CIS หลาย replica (stateless แล้วหลังย้าย PKCE) | full HA | ⬜ |
 
 > **หมายเหตุความปลอดภัย:** refresh token ใน Redis ต้อง **เก็บแบบเข้ารหัส** (AES-GCM ด้วย key จาก env) และใช้ ACL + `requirepass`/TLS ของ Redis เอง — ทุกค่า key/token ห้ามอยู่ใน plaintext ข้าม process
 

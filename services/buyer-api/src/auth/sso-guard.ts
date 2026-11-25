@@ -18,7 +18,6 @@ export async function isTicketAlive(ticket: string): Promise<boolean> {
     });
     if (!r.ok) return true; // ตรวจไม่ได้ → fail-open
     const out = (await r.json()) as { alive?: boolean };
-    console.log("[sso-guard] alive:", out.alive, "ticket:", ticket.slice(0, 12));
     return out.alive !== false;
   } catch {
     return true;
@@ -31,5 +30,5 @@ export function clearSsoCookies(res: Response) {
   res.clearCookie('buyer_id_token');
   res.clearCookie('sso_bound');
   res.clearCookie('sso_try_buyer');
-  res.clearCookie('allkons_sso');
+  res.clearCookie('central_sso');
 }

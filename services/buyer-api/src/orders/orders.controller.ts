@@ -81,10 +81,8 @@ export class OrdersController {
 
     // Logout กลาง propagate — session ผูกกับตั๋ว SSO: ตั๋วตาย → เคลียร์ + กลับ landing
     // (เพิ่มความสม่ำเสมอกับหน้า Home — ทุกหน้า page-render ตรวจ liveness ของตั๋ว)
-    console.log('[liveness-debug] sso_bound=', req.cookies?.['sso_bound']?.slice(0, 12));
     if (s && req.cookies?.['sso_bound']) {
       const alive = await isTicketAlive(req.cookies['sso_bound']);
-      console.log('[liveness-debug] alive=', alive);
       if (!alive) {
         clearSsoCookies(res);
         return res.redirect('/auth/login');

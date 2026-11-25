@@ -4,7 +4,7 @@ A Proof of Concept for turning a Central ID into a full **Central Identity Provi
 
 > UI language: every app supports **English / Thai** switching (button in the page header, or `?lang=en|th`; persisted in a cookie). The Keycloak login pages are bilingual too. Documentation: this file (English, default) and [README-TH.md](README-TH.md) (Thai).
 >
-> Original problem statement (Thai): [rootcase.md](rootcase.md) · 📐 **Full architecture diagrams (Mermaid)**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · 🔎 **SPoF / HA analysis**: [docs/SPoF-ANALYSIS.md](docs/SPoF-ANALYSIS.md)
+> Original problem statement (Thai): [rootcase.md](rootcase.md) · 📐 **Full architecture diagrams (Mermaid)**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · 🔎 **SPoF / HA analysis**: [docs/SPoF-ANALYSIS.md](docs/SPoF-ANALYSIS.md) · 🛡️ **Security audit (source-level, 4 questions)**: [docs/SECURITY-AUDIT.md](docs/SECURITY-AUDIT.md)
 
 ---
 
@@ -199,7 +199,7 @@ poc-kong-keycloak/
 | 11 | Extensions: Headless CIBA + Fintech Embedded Login + brute force + cross-app STT + SSO ticket (new-tab SSO) | `ciba-test.sh` 16/16 · `fintech-test.sh` 5/5 · `stt-test.sh` 33/33 | ✅ |
 | 12 | Central API Keys (scope-bound, minted at the ID Portal) + custom Kong plugins (gateway OIDC/introspection) + MCP Server + portal routing + EN/TH i18n | `openapi-test.sh` 31/31 · `mcp-test.sh` 12/12 | ✅ |
 
-> **Status (2026-11-20, generic "central" naming — template-ready):** all phases tested — **14 scripts, 198/198 checks PASS** (full sweep: smoke/SSO/openapi/revocation/dual-validation/mobile/CIBA/STT v2/Fintech/MCP — details in [docs/test-results.md](docs/test-results.md), Thai). Remaining known gaps: manual browser demo checklist (test-results §3) and the tenant-rejection case when tenant isn't hardcoded (⚠️ see §1 item 7 of that file).
+> **Status (2026-11-25):** all phases tested — **15 scripts, 162/162 checks PASS across 11 test suites** (full sweep on the new **Redis store backend**: smoke/SSO/openapi/MCP/revocation/dual-validation/mobile/CIBA/Fintech/STT v2 — details in [docs/test-results.md](docs/test-results.md), Thai). **Security audit** answering the reviewer's 4 implementation questions (ticket broker storage/atomic revocation/restart, session guard coverage, STT atomic consume, token exchange authorization): [docs/SECURITY-AUDIT.md](docs/SECURITY-AUDIT.md) — restart-survival gap closed with `STORE_BACKEND=redis` (AOF persistence proven by restart test). Remaining known gaps: manual browser demo checklist (test-results §3) and the tenant-rejection case when tenant isn't hardcoded (⚠️ see §1 item 7 of that file).
 
 ## 7. How to run
 

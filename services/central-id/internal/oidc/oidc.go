@@ -27,7 +27,7 @@ type Config struct {
 	ClientID      string // central-id-portal
 	ClientSecret  string // central-id-portal เป็น confidential (Token Exchange ของตั๋ว SSO)
 	FrontURL      string // http://localhost:3000
-	SSOStore      *sso.Store // broker ในตัว — portal redeem ตั๋วของตัวเองผ่าน store ตรง (ไม่ยิง HTTP หาตัวเอง)
+	SSOStore      sso.TicketStore // broker ในตัว — portal redeem ตั๋วของตัวเองผ่าน store ตรง (ไม่ยิง HTTP หาตัวเอง)
 	Keyfunc       auth.Keyfunc
 	ClientSecrets map[string]string // secret ของ confidential client ต้นทาง — ใช้ renew ตอน redeem
 }

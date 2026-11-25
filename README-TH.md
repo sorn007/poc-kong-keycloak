@@ -2,7 +2,7 @@
 
 Proof of Concept สำหรับยกระดับ Central ID ให้เป็น **Central Identity Provider** ที่ควบคุม Token, Session และสิทธิ์ของทุกระบบ (Buyer, CIS, Open API) จากจุดเดียว โดยใช้ **Keycloak (Free/Open Source)** เป็น Authorization Server และ **Kong Gateway (OSS)** เป็น API Gateway
 
-> เอกสารอ้างอิงปัญหาเดิม: [rootcase.md](rootcase.md) · 📐 **ภาพรวมสถาปัตยกรรม (Mermaid)**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · 🔎 **วิเคราะห์ SPoF/HA**: [docs/SPoF-ANALYSIS.md](docs/SPoF-ANALYSIS.md) · 🇬🇧 English version (default): [README.md](README.md) · 🌐 UI สลับภาษา EN/ไทย ได้ที่หัวทุกหน้า (หรือ ?lang=en)
+> เอกสารอ้างอิงปัญหาเดิม: [rootcase.md](rootcase.md) · 📐 **ภาพรวมสถาปัตยกรรม (Mermaid)**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · 🔎 **วิเคราะห์ SPoF/HA**: [docs/SPoF-ANALYSIS.md](docs/SPoF-ANALYSIS.md) · 🛡️ **ผล audit ซอร์สโค้ด (4 คำถาม)**: [docs/SECURITY-AUDIT.md](docs/SECURITY-AUDIT.md) · 🇬🇧 English version (default): [README.md](README.md) · 🌐 UI สลับภาษา EN/ไทย ได้ที่หัวทุกหน้า (หรือ ?lang=en)
 
 ---
 
@@ -179,7 +179,7 @@ poc-kong-keycloak/
 | 12 | Central API Keys (ออก key ผูก scope จาก ID Portal) + custom Kong plugins (gateway OIDC/introspection) + MCP Server + portal routing + i18n EN/ไทย | `openapi-test.sh` 31/31 · `mcp-test.sh` 12/12 | ✅ |
 | 12 | Central API Keys (ออก key ผูก scope จาก ID Portal) + custom Kong plugins (gateway OIDC/introspection) + MCP Server + portal routing + i18n EN/ไทย | `openapi-test.sh` 31/31 · `mcp-test.sh` 12/12 | ✅ |
 
-> **สถานะ (2026-11-20, ระบบใช้ชื่อกลาง "central" — template-ready):** ทดสอบครบทุก Phase แล้ว — **14 scripts, 198/198 checks PASS** (sweep ครบ: smoke/SSO/openapi/revocation/dual-validation/mobile/CIBA/STT v2/Fintech — รายละเอียด + สิ่งที่พบที่ [docs/test-results.md](docs/test-results.md)) เหลือเฉพาะ browser demo ด้วยมือ (checklist ใน test-results §3) และเคส Tenant reject เมื่อ tenant ไม่ใช่ hardcoded (⚠️ ดู §1 ข้อ 7)
+> **สถานะ (2026-11-25):** ทดสอบครบทุก Phase แล้ว — **15 scripts, 162/162 checks PASS จาก 11 test suites** (sweep ครบบน store backend **Redis** ตัวใหม่: smoke/SSO/openapi/MCP/revocation/dual-validation/mobile/CIBA/Fintech/STT v2 — รายละเอียด + สิ่งที่พบที่ [docs/test-results.md](docs/test-results.md)) · **ผล audit ซอร์สโค้ด** ตอบคำถาม reviewer 4 ข้อ (ticket broker/restart, session guard, STT atomic, token exchange): [docs/SECURITY-AUDIT.md](docs/SECURITY-AUDIT.md) — gap "restart = kick session ทุกคน" ปิดแล้วด้วย `STORE_BACKEND=redis` (พิสูจน์ด้วย restart test จริง) เหลือเฉพาะ browser demo ด้วยมือ (checklist ใน test-results §3) และเคส Tenant reject เมื่อ tenant ไม่ใช่ hardcoded (⚠️ ดู §1 ข้อ 7)
 
 ## 7. วิธีรัน (เมื่อ Scaffold แล้ว)
 

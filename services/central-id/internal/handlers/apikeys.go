@@ -77,7 +77,7 @@ func maskKey(full string) string {
 }
 
 // ApiKeysPage — หน้าจัดการ API keys (UI — ต้อง login)
-func ApiKeysPage(k auth.Keyfunc, cfg auth.Config, store *apikeys.Store) fiber.Handler {
+func ApiKeysPage(k auth.Keyfunc, cfg auth.Config, store apikeys.KeyStore) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		lang := web.LangOf(c)
 		s := currentSession(k, cfg, c)
@@ -189,7 +189,7 @@ document.querySelector('form[action="/apikeys/create"]').addEventListener('submi
 }
 
 // CreateAPIKey — ออก key ใหม่ (auth: session หรือ Bearer) — คืน key เต็มครั้งเดียว
-func CreateAPIKey(k auth.Keyfunc, cfg auth.Config, store *apikeys.Store) fiber.Handler {
+func CreateAPIKey(k auth.Keyfunc, cfg auth.Config, store apikeys.KeyStore) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		owner := ownerFromRequest(c, k, cfg)
 		if owner == "" {
@@ -218,7 +218,7 @@ func CreateAPIKey(k auth.Keyfunc, cfg auth.Config, store *apikeys.Store) fiber.H
 }
 
 // ListAPIKeys — รายการ keys ของผู้ใช้ (JSON — key แบบ mask)
-func ListAPIKeys(k auth.Keyfunc, cfg auth.Config, store *apikeys.Store) fiber.Handler {
+func ListAPIKeys(k auth.Keyfunc, cfg auth.Config, store apikeys.KeyStore) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		owner := ownerFromRequest(c, k, cfg)
 		if owner == "" {
@@ -239,7 +239,7 @@ func ListAPIKeys(k auth.Keyfunc, cfg auth.Config, store *apikeys.Store) fiber.Ha
 // 1) apiKeyStore (Central API Key)  2) ssoStore (SSO Ticket)
 // เพราะ endpoint เดียวกันถูกใช้ revoke ได้ทั้ง credential สองประเภท — id ที่ไม่เจอใน store
 // ใด store หนึ่งอาจเป็นของอีก store (ผู้ใช้/script ไม่จำเป็นต้องรู้ว่า id นั้นเป็นชนิดไหน)
-func RevokeAPIKey(k auth.Keyfunc, cfg auth.Config, store *apikeys.Store, ssoStore *sso.Store) fiber.Handler {
+func RevokeAPIKey(k auth.Keyfunc, cfg auth.Config, store apikeys.KeyStore, ssoStore sso.TicketStore) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		owner := ownerFromRequest(c, k, cfg)
 		if owner == "" {
@@ -258,7 +258,7 @@ func RevokeAPIKey(k auth.Keyfunc, cfg auth.Config, store *apikeys.Store, ssoStor
 
 // ValidateAPIKey — ตรวจ key สำหรับ Kong plugin / MCP server (key คือความลับ — ไม่ต้อง auth เพิ่ม)
 // คืน active + owner + scopes — inactive ก็ตอบ 200 (active:false) ตามธรรมเนียม RFC 7662
-func ValidateAPIKey(store *apikeys.Store) fiber.Handler {
+func ValidateAPIKey(store apikeys.KeyStore) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		key := c.FormValue("key")
 		if key == "" {

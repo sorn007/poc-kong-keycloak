@@ -4,11 +4,13 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/redis/go-redis/v9"
 
 	"central/central-id/internal/apikeys"
 	"central/central-id/internal/auth"
@@ -46,9 +48,22 @@ func main() {
 		ReadBufferSize: 16 * 1024,
 	})
 
+	// Backend switch (P1): STORE_BACKEND=redis (default เมื่อ REDIS_ADDR มีค่า) หรือ memory
+	// Redis ทำให้ ID Portal restart ไม่ kick ผู้ใช้ (tickets อยู่กับ AOF) + หลาย replica ใช้ state ร่วมกัน
+	rdb := redis.NewClient(&redis.Options{Addr: env("REDIS_ADDR", "redis:6379")})
+	backend := env("STORE_BACKEND", "memory")
+	if backend == "redis" {
+		if err := rdb.Ping(context.Background()).Err(); err != nil {
+			log.Fatalf("STORE_BACKEND=redis แต่เชื่อม Redis ไม่ได้: %v", err)
+		}
+		log.Printf("store backend: redis (%s)", env("REDIS_ADDR", "redis:6379"))
+	} else {
+		log.Print("store backend: memory (in-process — restart จะ kick session/tickets)")
+	}
+
 	// SSO Ticket — ตั๋ว SSO ระดับ ID กลาง (เปิดแอปอื่นในแท็บใหม่ไม่ต้อง login)
 	// สร้างก่อน Register เพราะ portal เองก็เป็น "ปลายทาง" ที่ redeem ตั๋วของตัวเองผ่าน store ตรง
-	ssoStore := sso.NewStore()
+	ssoStore := sso.NewTicketStoreFor(backend, rdb)
 	// secret ของ confidential client ที่ broker ใช้ตอน refresh grant แทนต้นทาง (public client ไม่ต้อง)
 	clientSecrets := map[string]string{
 		"fintech-web":       env("FINTECH_CLIENT_SECRET", ""),
@@ -98,7 +113,7 @@ func main() {
 	// Session Transfer Token (จำลอง Native-to-Web SSO):
 	// mobile app ที่มี native session ส่ง token มาสร้าง one-time code (60 วินาที)
 	// เพื่อเปิดเว็บแอปอื่นโดยไม่ต้องกรอกรหัสผ่านซ้ำ — ดู docs/research-headless-auth.md
-	sttStore := stt.NewStore()
+	sttStore := stt.NewCodeStoreFor(backend, rdb)
 	app.Post("/stt/create", handlers.CreateSTT(sttStore, jwks, cfg.Issuer))
 	app.Post("/stt/redeem", handlers.RedeemSTT(sttStore))
 
@@ -110,7 +125,7 @@ func main() {
 
 	// Central API Keys — ออก API key ผูก scope จากหน้าเว็บ → ใช้กับ Open API (Kong) หรือ MCP server
 	// (validate endpoint คือ contract เดียวกันสำหรับทั้ง Kong plugin และ MCP server)
-	apiKeyStore := apikeys.NewStore()
+	apiKeyStore := apikeys.NewKeyStoreFor(backend, rdb)
 	app.Get("/apikeys", handlers.ApiKeysPage(jwks, cfg, apiKeyStore))
 	app.Post("/apikeys/create", handlers.CreateAPIKey(jwks, cfg, apiKeyStore))
 	app.Get("/apikeys/list", handlers.ListAPIKeys(jwks, cfg, apiKeyStore))

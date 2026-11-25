@@ -19,6 +19,22 @@ services:
       retries: 12
     networks: [central-net]
 
+  # Redis — shared store backend (P1 จาก SPoF analysis): tickets/api keys/STT codes
+  # อยู่รอดจาก ID Portal restart + หลาย replica ใช้ state ร่วมกัน
+  # เปิดใช้ด้วย STORE_BACKEND=redis ใน .env (ค่า default: memory — พฤติกรรมเดิมของ POC)
+  redis:
+    image: redis:7-alpine
+    container_name: poc-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks: [central-net]
+
   keycloak:
     # KC 26: mapper config key เป็นเอกพจน์ (access.token.claim) และ realm ที่ import ด้วย clientScopes
     # ต้องใส่ stock scopes (basic ฯลฯ) เอง ไม่งั้น token จะไม่มี sub — ดู docs/test-results.md §4 ข้อ 12
@@ -123,10 +139,14 @@ services:
       FINTECH_CLIENT_SECRET: ${FINTECH_CLIENT_SECRET}
       CIS_CLIENT_SECRET: ${CIS_CLIENT_SECRET}
       IDPORTAL_CLIENT_SECRET: ${IDPORTAL_CLIENT_SECRET}
+      # store backend — memory (default) หรือ redis (ทน restart · ดู docs/SPoF-ANALYSIS.md §4.2)
+      STORE_BACKEND: ${STORE_BACKEND:-memory}
+      REDIS_ADDR: redis:6379
     ports:
       - "3000:3000"
     depends_on:
       - keycloak
+      - redis
     networks: [central-net]
 
   # Headless Demo (CD = Consumption Device) — แอปที่ทำหน้า login ของตัวเอง
@@ -205,6 +225,7 @@ services:
 
 volumes:
   pgdata:
+  redis_data:
 
 networks:
   central-net:

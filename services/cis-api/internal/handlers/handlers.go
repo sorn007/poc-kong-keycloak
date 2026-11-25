@@ -196,7 +196,7 @@ func ProjectsPage(k auth.Keyfunc, cfg auth.Config) fiber.Handler {
 				clearLocal("cis_id_token")
 				clearLocal("sso_bound")
 				clearLocal("sso_try_cis")
-				clearLocal("allkons_sso")
+				clearLocal("central_sso")
 				return c.Redirect("/auth/login", fiber.StatusFound)
 			}
 			if claims, err := auth.VerifyCentral(k, cfg, token); err == nil {
