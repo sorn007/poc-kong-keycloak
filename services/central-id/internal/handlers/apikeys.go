@@ -132,7 +132,7 @@ func ApiKeysPage(k auth.Keyfunc, cfg auth.Config, store apikeys.KeyStore) fiber.
 </div>
 <div class="card"><h2>%s</h2>
 <table><tr><th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th><th></th></tr>%s</table></div>
-<div class="card"><h2>%s</h2><p class="sub">%s</p>
+<div class="card"><h2>%s</h2>
 <table><tr><th>%s</th><td><code>apikey: &lt;key&gt;</code> %s Kong <code>/openapi/apikey/*</code></td></tr>
 <tr><th>%s</th><td><code>POST /apikeys/validate</code> <code>key=&lt;key&gt;</code> → <code>{active, owner, scopes}</code> — %s</td></tr></table></div>`,
 			web.T(lang, "Central API Keys", "Central API Keys"),

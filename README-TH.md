@@ -105,6 +105,8 @@ JWT Access Token แบบ **RS256** ที่ Keycloak ออกให้:
 > **STT Session Transfer (ข้ามแอปทุกคู่)** — ต้นทาง (mobile/fintech) สร้าง one-time code ที่ ID Portal (`POST /stt/create` + `dest`) แล้วพา browser ไปจุดรับของปลายทาง `/auth/stt?code=` — ทุกปลายทางตรวจ `aud` ของตัวเองก่อนรับ session; เคส **aud ต่างกัน (→ CIS)** ใช้ **Token Exchange (KC Standard V2)** แลกเป็น token `aud=cis-api` โดย token ต้นทางต้องมี scope `stt-bridge` (เติม cis-web ใน aud) — code ใช้ครั้งเดียว อายุ 60 วิ ผูกปลายทาง — จำลอง Native-to-Web SSO แบบ Auth0 — ดู ADR-004 + ทดสอบ `scripts/stt-test.sh` (ผล §1 ข้อ 19)
 > **SSO Ticket ของ ID กลาง** — fintech login สำเร็จจะออกตั๋ว `central_sso` ให้ browser (cookie ของ host localhost — browser ส่งให้ทุก port ใน POC) → **เปิด Buyer/CIS แท็บใหม่ตรง ๆ ก็ SSO เข้าเลย** ไม่ต้องกลับมากดปุ่มที่ fintech — ตั๋ว reusable 30 นาที + broker ต่ออายุ token ใหม่ให้อัตโนมัติ (เก็บ refresh_token ไว้) + **Logout กลาง propagate จริง**: session ปลายทางผูกกับตั๋ว → logout ที่แอปใดก็ได้ (revoke ทุกตั๋ว) → แอปอื่นตายตามตั้งแต่ request ถัดไป — ผล §1 ข้อ 20
 > **Central API Keys** — ผู้ใช้ออก API key ผูก scope จากหน้า /apikeys ของ ID Portal (:3000) — key (header `apikey` หรือ `X-API-Key` — รองรับทั้งคู่) ใช้กับ Kong route `/openapi/apikey/*` และ MCP server (ตรวจผ่าน POST /apikeys/validate — contract เดียวกับ Kong plugin) — ดู ADR-005
+> **Kong plugins แบบ thin wrapper** — custom plugins ทั้ง 3 (`oidc-central`, `oidc-introspect`, `central-apikey`) ใช้ Lua library กลางร่วมกัน (`kong/lib/central_common/` — cache/HTTP/claims/JWKS/error) · dependency ที่แตะ Kong-internal (`jwt_parser`) ถูก isolate ในไฟล์ lib เดียว — อัปเกรด Kong แก้จุดเดียว — ดู ADR-006
+> **กลไก session exchange แกนเดียว** — SSO Ticket (reusable, 30 นาที, renew ได้) และ STT code (one-time, 60 วิ, ผูกปลายทาง) วิ่งบน engine เดียวกัน `ticketcore` (2 policies × 2 store backends: memory/Redis) — ดู ADR-007
 > **Headless App (CIBA)** เป็น confidential client (`oidc.ciba.grant.enabled=true`) — แอปทำหน้า login เอง ไม่ redirect ไป Keycloak เลย (ผู้ใช้ยืนยันผ่านอุปกรณ์ ID :3040) — token มี aud=buyer-api ผ่าน identity-buyer-web ใช้กับ Buyer API เดิมได้ทันที — รายละเอียด: research-headless-auth.md
 > **Mobile App** เป็น public client (ไม่มี secret) — บังคับ **PKCE S256** ที่ server, login ผ่าน system browser ตาม RFC 8252 (ไม่ใช้ WebView), refresh token rotation + reuse detection (ขโมย token เก่า → ยกเลิกทั้งตระกูล) — รายละเอียดทดสอบที่ `scripts/mobile-test.sh`
 
@@ -139,7 +141,9 @@ poc-kong-keycloak/
 ├── kong/
 │   ├── kong.template.yml            ← Template declarative config (services, routes, plugins)
 │   ├── kong.yml                     ← Generated โดย setup.sh (ฝัง realm public key + secrets + explicit ids)
-│   └── custom/                      ← Custom Kong plugins (Lua): oidc-central · oidc-introspect · central-apikey
+│   └── custom/                      ← Custom Kong plugins (Lua) แบบ thin + shared lib:
+│                                        kong/lib/central_common/ (cache/http/req/claims/resp/jwks — ADR-006)
+│                                        kong/plugins/ · oidc-central · oidc-introspect · central-apikey
 ├── services/
 │   ├── buyer-api/                   ← Mock Buyer (NestJS): Central Guard + Legacy + Dual + OIDC/PKCE
 │   └── cis-api/                     ← Mock CIS (Go Fiber): Central Middleware + Legacy + Dual
