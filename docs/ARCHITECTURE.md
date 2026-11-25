@@ -276,3 +276,5 @@ flowchart LR
 - **production hardening ที่ยังไม่อยู่ใน POC:** backchannel logout, HA, WAF, mTLS, per-key quota
 
 รายละเอียดทั้งหมด (รวมสิ่งที่เจอจริงระหว่างทำ): [test-results.md](test-results.md) findings 1–55 · ADR-001..005
+
+> 🔎 **SPOF / คอขวด / แผน HA (Redis, Keycloak HA, Kong multi-node):** [SPoF-ANALYSIS.md](SPoF-ANALYSIS.md)
