@@ -12,12 +12,29 @@ echo
 b64url_std() { tr '+/' '-_' | tr -d '=\n'; }
 
 JAR="$(mktemp)"
-HDRS="$(mktemp)"
-trap 'rm -f "$JAR" "$HDRS"' EXIT
+BODY="$(mktemp)"
+trap 'rm -f "$JAR" "$BODY"' EXIT
 
 pkce_pair() {
   VERIFIER="$(head -c 32 /dev/urandom | base64 | b64url_std)"
   CHALLENGE="$(printf %s "$VERIFIER" | openssl dgst -sha256 -binary | base64 | b64url_std)"
+}
+
+# submit_login <ไฟล์หน้า login> — กรอก credential ลงฟอร์ม login ของ Central ID แล้วตาม redirect จนครบ
+# ด้วย cookie jar เดิม → echo URL สุดท้าย · exit 1 = ไม่ใช่หน้า login (ไม่มีช่อง username หรือฟอร์ม)
+# รวบรวม hidden inputs (execution, client_id ฯละ) เพื่อ POST กลับพร้อม credential
+submit_login() {
+  local action n v tag
+  grep -q 'name="username"' "$1" || return 1
+  action="$(grep -o 'action="[^"]*"' "$1" | head -1 | sed 's/^action="//;s/"$//;s/&amp;/\&/g')"
+  [ -n "$action" ] || return 1
+  local data=(-d "username=buyer-user" -d "password=$TEST_USER_PASSWORD" -d "credentialId=")
+  while IFS= read -r tag; do
+    n="$(sed -n 's/.*[ ]name="\([^"]*\)".*/\1/p' <<<"$tag")"
+    v="$(sed -n 's/.*value="\([^"]*\)".*/\1/p' <<<"$tag")"
+    [ -n "$n" ] && [ -n "$v" ] && data+=(-d "$n=$v")
+  done < <(grep -o '<input[^>]*type="hidden"[^>]*>' "$1")
+  curl -s -c "$JAR" -b "$JAR" -L -o /dev/null -w "%{url_effective}" "${data[@]}" "$action"
 }
 
 # ---------- ขั้น 1: Login ที่ BUYER (buyer-web) ----------
@@ -27,21 +44,11 @@ STATE_B="s$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 AUTH_BUYER="$ISSUER/protocol/openid-connect/auth?client_id=buyer-web&response_type=code&scope=openid%20orders.read%20orders.write&redirect_uri=http%3A%2F%2Flocalhost%3A3010%2Fauth%2Fcallback&state=$STATE_B&code_challenge=$CHALLENGE&code_challenge_method=S256&nonce=n$(date +%s)"
 
 # ตาม redirect ไปหน้า login ของ Keycloak
-PAGE="$(curl -s -L -c "$JAR" -b "$JAR" "$AUTH_BUYER")"
-ACTION="$(grep -o 'action="[^"]*"' <<<"$PAGE" | head -1 | sed 's/^action="//;s/"$//;s/&amp;/\&/g')"
-[ -z "$ACTION" ] && { echo "FAIL  ไม่พบ login form ของ Keycloak (ธีมเปลี่ยน?)"; exit 1; }
-
-# รวบรวม hidden inputs (execution, client_id ฯลฯ) เพื่อ POST กลับพร้อม credential
-DATA=(-d "username=buyer-user" -d "password=$TEST_USER_PASSWORD" -d "credentialId=")
-while IFS= read -r tag; do
-  N="$(sed -n 's/.*[ ]name="\([^"]*\)".*/\1/p' <<<"$tag")"
-  V="$(sed -n 's/.*value="\([^"]*\)".*/\1/p' <<<"$tag")"
-  [ -n "$N" ] && [ -n "$V" ] && DATA+=(-d "$N=$V")
-done < <(grep -o '<input[^>]*type="hidden"[^>]*>' <<<"$PAGE")
+curl -s -L -c "$JAR" -b "$JAR" -o "$BODY" "$AUTH_BUYER"
 
 # POST credential — ตาม redirect จนครบ (Identity Brokering: login ที่ upstream realm แล้ว
 # วิ่งกลับผ่าน broker endpoint ของ realm central ก่อนถึง callback ของแอป)
-FINAL_B="$(curl -s -c "$JAR" -b "$JAR" -L -o /dev/null -w "%{url_effective}" "${DATA[@]}" "$ACTION")"
+FINAL_B="$(submit_login "$BODY")" || { echo "FAIL  ไม่พบ login form ของ Keycloak (ธีมเปลี่ยน?)"; exit 1; }
 expect_contains "login buyer-web สำเร็จ (ผ่าน Central ID brokering) → callback มี code=" "$FINAL_B" "code="
 
 CODE_B="$(sed -n 's/.*[?&]code=\([^&]*\).*/\1/p' <<<"$FINAL_B")"
@@ -79,22 +86,37 @@ AT_CIS="$(jq -r '.access_token // empty' <<<"$TOK_CIS")"
 [ -n "$AT_CIS" ] && check "แลก code ของ cis-web ได้ access_token" "yes" "yes" || check "แลก code ของ cis-web ได้ access_token" "yes" "no"
 expect_contains "cis token aud มี cis-api" "$(jwt_payload "$AT_CIS")" '"aud"'
 
-# ---------- ขั้น 3: Logout จากแอป (downstream realm) ----------
-# สถาปัตยกรรม brokering: SSO session จริงอยู่ที่ Central ID (upstream) —
-# logout ที่แอปยุติ session ฝั่ง Keycloak เท่านั้น ไม่กระทบ Central ID (เหมือน logout Google จากแอป)
-curl -s -b "$JAR" -c "$JAR" -o /dev/null \
-  "$ISSUER/protocol/openid-connect/logout?id_token_hint=$ID_BUYER"
+# ---------- ขั้น 3: Logout จากแอป (RP-initiated logout ที่ realm central) ----------
+# Keycloak ส่งต่อเป็น Single Logout ผ่าน Identity Brokering: ยุติ session ของ realm central
+# แล้ว redirect browser ไป logout ที่ Central ID (upstream) ต่อเป็น chain ของ redirect —
+# browser จริงตามไปจนจบ ดังนั้น logout จากแอปใดก็ตาม session ของ Central ID ถูกยุติด้วย
+# (ไม่เหมือน logout จากแอปของ Google ที่ SSO ของ Google ยังอยู่)
+# ต้องตาม redirect ให้ครบด้วย cookie jar เดิม (-L) เหมือน browser: response แรกคือ 302 ไป
+# upstream แล้ว — curl ที่ไม่ตามจึงไม่เคยยิง logout ที่ Central ID แล้วเห็น SSO "ยังอยู่" ผลลวง
+curl -s -b "$JAR" -c "$JAR" -L -o /dev/null \
+  -w "  app logout: %{num_redirects} redirects -> %{url_effective}\n" \
+  "$ISSUER/protocol/openid-connect/logout?id_token_hint=$ID_BUYER&post_logout_redirect_uri=http%3A%2F%2Flocalhost%3A3010"
 
+# เริ่ม flow ของแอปใหม่ด้วย browser เดิม — ต้องเจอหน้า login ของ Central ID อีกครั้ง (ต้องกรอกรหัสใหม่)
 pkce_pair
 AUTH_CIS2="$ISSUER/protocol/openid-connect/auth?client_id=cis-web&response_type=code&scope=openid%20projects.read&redirect_uri=http%3A%2F%2Flocalhost%3A3020%2Fauth%2Fcallback&state=x&code_challenge=$CHALLENGE&code_challenge_method=S256"
-FINAL_C2="$(curl -s -b "$JAR" -c "$JAR" -L -o /dev/null -w "%{url_effective}" "$AUTH_CIS2")"
+FINAL_C2="$(curl -s -b "$JAR" -c "$JAR" -L -o "$BODY" -w "%{url_effective}" "$AUTH_CIS2")"
 if grep -q "code=" <<<"$FINAL_C2"; then
-  check "logout จากแอป → SSO ของ Central ID ยังอยู่ (login ใหม่ได้ code อัตโนมัติ)" "yes" "yes"
+  check "logout จากแอป → เริ่ม flow ใหม่ต้องเจอหน้า login ของ Central ID (กรอกรหัสใหม่)" "login-form" "ยังได้ code อัตโนมัติ (SSO ของ Central ID ยังอยู่)"
+elif grep -q "central-id-upstream" <<<"$FINAL_C2" && grep -q 'name="username"' "$BODY"; then
+  check "logout จากแอป → เริ่ม flow ใหม่ต้องเจอหน้า login ของ Central ID (กรอกรหัสใหม่)" "login-form" "login-form"
 else
-  check "logout จากแอป → SSO ของ Central ID ยังอยู่" "yes" "no ($FINAL_C2)"
+  check "logout จากแอป → เริ่ม flow ใหม่ต้องเจอหน้า login ของ Central ID (กรอกรหัสใหม่)" "login-form" "ไม่พบ login form ($FINAL_C2)"
 fi
 
 # ---------- ขั้น 4: Logout กลางที่ Central ID จริง (upstream) ----------
+# ขั้น 3 ยุติ session ของ Central ID ไปแล้ว — ต้อง login ใหม่ที่หน้า login ที่ขั้น 3 จบอยู่ก่อน
+# จึงจะมี session จริงให้ logout (KC 26.3 แสดงหน้า confirm แม้ไม่มี session → check นี้ผ่านลวงได้)
+if RELOGIN="$(submit_login "$BODY")" && grep -q "code=" <<<"$RELOGIN"; then
+  echo "  login ใหม่ที่ Central ID สำเร็จ (callback มี code) → มี session ให้ logout กลาง"
+else
+  echo "  ข้าม login ใหม่ (ไม่พบหน้า login ของ Central ID — session เดิมยังอยู่ หรือขั้น 3 ล้มเหลว)"
+fi
 # KC แสดงหน้า confirm เมื่อ logout ด้วย session cookie เพียงอย่างเดียว — POST confirmLogout
 UP_LOGOUT="$KC/realms/central-id-upstream/protocol/openid-connect/logout"
 CONFIRM_PAGE="$(curl -s -b "$JAR" -c "$JAR" "$UP_LOGOUT")"

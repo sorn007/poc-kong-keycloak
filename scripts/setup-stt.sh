@@ -60,7 +60,8 @@ CODE=$(curl -s -o /tmp/stt-scope.txt -w "%{http_code}" -X POST "$BASE/client-sco
 check "สร้าง client scope stt-bridge" "201" "$CODE"
 SID=$(curl -s "$BASE/client-scopes" -H "$AUTH" | jq -r '.[] | select(.name=="stt-bridge") | .id' | head -1)
 [ -n "$SID" ] || { check "ได้ id ของ stt-bridge" "yes" "no"; exit 1; }
-MAPPER=$(curl -s "$BASE/client-scopes/$SID" -H "$AUTH" | jq -r '.protocolMappers[0].config["included.client.audience"] // empty')
+# เลือก mapper ตาม "ชื่อ" — Keycloak คืนลำดับ protocolMappers ไม่แน่นอน การอ่านตัวที่ [0] ทำให้ check ล้มสลับฉากตอนรันซ้ำ
+MAPPER=$(curl -s "$BASE/client-scopes/$SID" -H "$AUTH" | jq -r '.protocolMappers[] | select(.name=="aud-cis-web-for-exchange") | .config["included.client.audience"] // empty')
 check "mapper เติม aud=cis-web" "cis-web" "$MAPPER"
 
 echo "--- 2) ผูก stt-bridge เป็น optional scope ของต้นทาง (buyer-web/fintech-web/mobile-app) ---"
