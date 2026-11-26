@@ -50,6 +50,9 @@ Repo นี้คือ Proof of Concept สำหรับ Central: ใช้ *
 - Dual Validation (legacy + central token) ต้องเลือก validator จาก **allowlist ที่กำหนดไว้ก่อน** — ห้าม fallback จาก central ไป legacy โดยไม่มีเงื่อนไข
 - Principal Context มาตรฐานทุกระบบ: `req.auth = { subject, clientId, principalType, scopes, tokenId }` — Controller เดิมเข้าถึงผ่าน Adapter เท่านั้น
 
+- **Authentication อยู่ที่ SDK กลางใน `packages/` (ADR-008)** — `@central/auth-nestjs` (buyer-api) และ `central/auth-go` (CIS, ID Portal, ID device, Fintech) เป็น policy เดียวของการตรวจ token, scope guard, gateway-trust และ ticket liveness · **ห้ามเขียน guard/verifier ซ้ำใน service** — ให้ระบุเฉพาะตัวตนของตัวเอง (issuer/audience/JWKS + legacy secret) ที่ไฟล์ต่อ SDK ของ service เช่น `services/buyer-api/src/central-auth.ts`
+- **SDK ทำเฉพาะ Authentication** — tenant/business permission ยังอยู่ที่ service ตามข้อ "ห้ามย้าย business authorization" ด้านบน · เปลี่ยน Token Contract ให้แก้ที่ `packages/` ก่อน (พร้อม unit test ของ SDK) แล้ว rebuild service
+
 ## Naming & Configuration Contract
 
 | รายการ | ค่าที่ใช้ใน POC ทั้งหมด |
