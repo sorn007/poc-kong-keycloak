@@ -12,8 +12,8 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/redis/go-redis/v9"
 
+	"central/auth-go"
 	"central/central-id/internal/apikeys"
-	"central/central-id/internal/auth"
 	"central/central-id/internal/handlers"
 	"central/central-id/internal/oidc"
 	"central/central-id/internal/sso"
@@ -132,6 +132,6 @@ func main() {
 	app.Post("/apikeys/revoke", handlers.RevokeAPIKey(jwks, cfg, apiKeyStore, ssoStore))
 	app.Post("/apikeys/validate", handlers.ValidateAPIKey(apiKeyStore))
 
-	log.Printf("central-id portal listening :%s — audience=%s", port, cfg.Audience)
+	log.Printf("central-id portal listening :%s — audience=%s auth-sdk=%s", port, cfg.Audience, auth.Version)
 	log.Fatal(app.Listen(":" + port))
 }

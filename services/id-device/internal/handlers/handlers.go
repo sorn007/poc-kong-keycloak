@@ -16,7 +16,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	"central/id-device/internal/auth"
+	"central/auth-go"
 	"central/id-device/internal/device"
 	"central/id-device/internal/web"
 )

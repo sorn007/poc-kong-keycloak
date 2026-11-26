@@ -1,49 +1,6 @@
 import { All, Controller, Delete, Get, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { config } from '../config';
-
-// MCP Server (remote HTTP — Streamable HTTP transport, JSON โหมด) ของ Buyer
-// • ปลายทาง: POST /mcp (JSON-RPC 2.0) — initialize / tools/list / tools/call
-// • Auth: Central API Key (header `apikey` หรือ `Authorization: Bearer central_…`)
-//   ตรวจกับ ID Portal /apikeys/validate → ได้ owner + scopes ของ key
-// • Tools ถูก "กรองตาม scope ของ key" — tools/list แสดงเฉพาะ tool ที่ scope ครอบ
-//   (key ที่ไม่มี orders.write จะไม่เห็น create_order เลย)
-// • Streamable HTTP โหมด stateless: transport/server ใหม่ต่อ request (ไม่มี SSE session)
-//   GET/DELETE → 405 ตามข้ออนุญาตของ spec (server ไม่มี server→client stream)
-// • ใช้ official SDK ผ่าน dynamic import (SDK เป็น ESM — โหลดตอน runtime บน Node 22)
-
-const ID_PORTAL = process.env.IDPORTAL_INTERNAL_BASE ?? 'http://central-id:3000';
-
-type KeyAuth = { ok: boolean; owner: string; scopes: string[] };
-
-async function validateKey(req: Request): Promise<KeyAuth> {
-  let key: string | undefined = req.headers['apikey'] as string | undefined;
-  const authz = req.headers['authorization'] as string | undefined;
-  if (!key && authz && authz.startsWith('Bearer central_')) {
-    key = authz.slice('Bearer '.length);
-  }
-  if (!key) return { ok: false, owner: '', scopes: [] };
-  try {
-    const r = await fetch(`${ID_PORTAL}/apikeys/validate`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ key }),
-      signal: AbortSignal.timeout(8000),
-    });
-    const out = (await r.json()) as {
-      active?: boolean;
-      owner?: string;
-      scopes?: string[];
-    };
-    if (!r.ok || out.active !== true || !out.owner) {
-      return { ok: false, owner: '', scopes: [] };
-    }
-    return { ok: true, owner: out.owner, scopes: out.scopes ?? [] };
-  } catch {
-    return { ok: false, owner: '', scopes: [] };
-  }
-}
-
+import { apiKeyVerifier } from '../central-auth';
 const DEMO_ORDERS = [
   { orderId: 'ORD-001', company: 'company_001', total: 1500, status: 'success' },
 ];
@@ -100,8 +57,11 @@ export class McpController {
   // Streamable HTTP: POST /mcp — JSON-RPC เดี่ยว (โหมด stateless: transport ใหม่ต่อ request)
   @Post()
   async post(@Req() req: Request, @Res() res: Response) {
-    const auth = await validateKey(req);
-    if (!auth.ok) {
+    // Central API Key — ตรวจกับ ID Portal ทุก request (fail-closed) ผ่าน SDK
+    const principal = await apiKeyVerifier.verify(
+      apiKeyVerifier.extractKey(req.headers),
+    );
+    if (!principal) {
       return res.status(401).json({
         error: 'unauthorized',
         detail:
@@ -115,7 +75,7 @@ export class McpController {
           import('@modelcontextprotocol/sdk/server/mcp.js'),
           import('@modelcontextprotocol/sdk/server/streamableHttp.js'),
         ]);
-      const server = await buildServer(auth.scopes);
+      const server = await buildServer(principal.scopes);
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined, // stateless
         enableJsonResponse: true, // JSON โหมดเดียว — ไม่เปิด SSE stream

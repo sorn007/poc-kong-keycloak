@@ -9,7 +9,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	jwt "github.com/golang-jwt/jwt/v5"
 
-	"central/cis-api/internal/auth"
+	"central/auth-go"
 	"central/cis-api/internal/oidc"
 	"central/cis-api/internal/web"
 )

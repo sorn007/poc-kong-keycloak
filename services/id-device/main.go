@@ -11,8 +11,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
+	"central/auth-go"
 	"central/id-device/internal/applogin"
-	"central/id-device/internal/auth"
 	"central/id-device/internal/device"
 	"central/id-device/internal/handlers"
 )
@@ -61,7 +61,7 @@ func main() {
 		Realm:        loginCfg.Realm,
 		FrontURL:     env("APP_FRONT_URL", "http://localhost:3040"),
 	}, func(idToken string) string {
-		claims, err := auth.VerifyApprover(jwks, loginCfg, idToken)
+		claims, err := auth.VerifyCentral(jwks, loginCfg, idToken)
 		if err != nil {
 			log.Printf("approver login rejected: %v", err)
 			return ""

@@ -1,9 +1,9 @@
 import { Controller, Get, Header, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { verifyCentralToken } from './verify-central';
 import { page, readSession, sessionCards, toastScript } from '../ui';
 import { langOf, t } from '../i18n';
-import { clearSsoCookies, isTicketAlive } from './sso-guard';
+import { clearSessionCookies } from '@central/auth-nestjs';
+import { auth, ticketGuard } from '../central-auth';
 
 const broker =
   process.env.IDPORTAL_INTERNAL_BASE ?? 'http://central-id:3000';
@@ -27,11 +27,10 @@ export class HomeController {
     // Logout กลาง propagate — session ผูกกับตั๋ว: ตั๋วตาย (revoke/logout-all ที่ไหนก็ได้)
     // → เคลียร์ session + cookie ตั๋ว แล้วกลับ "หน้า landing ของแอปเรา" (ไม่พาไปหน้า login ของ Keycloak เอง)
     if (raw && req.cookies?.['sso_bound']) {
-      if (!(await isTicketAlive(req.cookies['sso_bound']))) {
-        res.clearCookie('buyer_session');
-        res.clearCookie('sso_bound');
-        res.clearCookie('sso_try_buyer');
-        res.clearCookie('central_sso');
+      if (!(await ticketGuard.isAlive(req.cookies['sso_bound']))) {
+        // เคลียร์ชุด cookie เดียวกันทุกหน้า (รวม id_token) — รายชื่อ cookie อยู่ที่ SDK
+        // ต้องเคลียร์ "ก่อน" redirect: ถ้ายังถือ cookie เดิม การ redirect กลับ / จะวนไม่รู้จบ
+        clearSessionCookies(res, 'buyer');
         return res.redirect('/');
       }
     }
@@ -67,7 +66,7 @@ export class HomeController {
 
     // มี cookie — verify ก่อนเชื่อถือ (signature/iss/aud/exp ผ่าน JWKS)
     try {
-      await verifyCentralToken(raw);
+      await auth.central.verify(raw);
     } catch {
       // token หมดอายุ/ไม่ถูกต้อง — ถ้า browser ยังมีตั๋ว SSO ให้ลอง redeem ใหม่ให้เงียบ ๆ
       // (ตั๋วยังอยู่ = broker renew token ใหม่ → กลับเข้าระบบได้เลย; ตั๋วตาย → กลับหน้า landing)

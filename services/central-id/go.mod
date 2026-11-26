@@ -3,9 +3,9 @@ module central/central-id
 go 1.24
 
 require (
-	github.com/MicahParks/keyfunc/v3 v3.3.3
+	github.com/MicahParks/keyfunc/v3 v3.3.3 // indirect
 	github.com/gofiber/fiber/v2 v2.52.6
-	github.com/golang-jwt/jwt/v5 v5.2.1
+	github.com/golang-jwt/jwt/v5 v5.2.1 // indirect
 	github.com/redis/go-redis/v9 v9.5.1
 )
 
@@ -26,3 +26,7 @@ require (
 	golang.org/x/sys v0.28.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
 )
+
+require central/auth-go v0.1.0
+
+replace central/auth-go => ../../packages/auth-go

@@ -121,25 +121,6 @@ export class OidcController {
     }
   }
 
-  // isTicketAlive — ตรวจกับ ID กลางว่า session ที่ผูกกับตั๋วยังมีชีวิต (logout กลาง propagate)
-  private async isTicketAlive(ticket: string): Promise<boolean> {
-    if (!ticket) return true; // session ไม่ได้ผูกตั๋ว → ไม่ตรวจ (JWT มีชีวิตถึง exp ตามข้อจำกัด)
-    const broker =
-      process.env.IDPORTAL_INTERNAL_BASE ?? 'http://central-id:3000';
-    try {
-      const r = await fetch(`${broker}/sso/check`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ ticket }),
-        signal: AbortSignal.timeout(5000),
-      });
-      if (!r.ok) return true; // ตรวจไม่ได้ → fail-open (production ตั้งนโยบายเอง)
-      const out = (await r.json()) as { alive?: boolean };
-      return out.alive !== false;
-    } catch {
-      return true;
-    }
-  }
 
   // logoutAllSSO — ขอ ID กลางยกเลิก "ทุก" ตั๋ว (logout กลางแบบ global) — best-effort
   private logoutAllSSO(accessToken: string): void {

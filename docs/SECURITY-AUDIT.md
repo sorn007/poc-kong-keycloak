@@ -79,6 +79,7 @@
 | 5 | **Store backend Redis (2026-11-25)** — SSO ticket/API key/STT code เป็น interface 2 backends (`STORE_BACKEND=redis|memory`) + service redis:7-alpine (AOF) — ปิด gap "restart = kick ทุกคน" พร้อมพิสูจน์ restart จริง | `central-id/internal/{sso,apikeys,stt}/{store,redis,factory}.go`, `main.go`, `docker-compose.yml`, `.env.example` |
 | 6 | **แก้ cookie ชื่อเก่าค้าง** — `clearSsoCookies` (buyer) และ `clearLocal` (CIS ProjectsPage) เคลียร์ `allkons_sso` (ชื่อเดิม) → แก้เป็น `central_sso` (ชื่อจริงปัจจุบัน) | `buyer-api/src/auth/sso-guard.ts`, `cis-api/internal/handlers/handlers.go` |
 | 7 | ยอมรับ + บันทึกช่องว่าง production ที่เหลือ: refresh token plaintext, fail-open บน broker timeout, Kong cache 15s vs MCP 0s (SLA ต่างกัน), Redis ตัวเดี่ยว (ต้อง HA/TLS ก่อน prod) | ADR-005 + SPoF-ANALYSIS §4.2 + หัวข้อข้างบน |
+| 8 | **Authentication policy รวมเป็น SDK กลาง (2026-11-25)** — guard/middleware ที่เคยกระจายในแต่ละ service ย้ายมาอยู่ที่ `@central/auth-nestjs` + `central/auth-go` ที่เดียว พร้อม unit test ครอบ 401/403 — ตอนรวมพบ policy ที่เพี้ยนจากกัน 6 จุด (leeway 5ns, token ไร้ `exp` ผ่านได้ที่ buyer, ฯลฯ) และแก้เป็นชุดเดียวแล้ว · นโยบาย "ตรวจ ticket ทุก request หรือไม่" (Q2) ยังเหมือนเดิม — เปลี่ยนได้ที่จุดเดียวคือ SDK | ADR-008 + finding 61 |
 
 ## การทดสอบหลังแก้ (สรุป — 2026-11-25 บน store backend Redis)
 

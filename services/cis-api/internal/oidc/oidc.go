@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"central/auth-go"
 	"github.com/gofiber/fiber/v2"
 
 	"central/cis-api/internal/web"
@@ -111,9 +112,9 @@ func exchangeCode(cfg Config, code, verifier string) (*tokenResponse, error) {
 func exchangeToken(cfg Config, subjectToken string) (*tokenResponse, error) {
 	tokenURL := fmt.Sprintf("%s/realms/%s/protocol/openid-connect/token", cfg.InternalBase, cfg.Realm)
 	form := url.Values{
-		"grant_type":         {"urn:ietf:params:oauth:grant-type:token-exchange"},
-		"client_id":          {cfg.ClientID},
-		"subject_token":      {subjectToken},
+		"grant_type":    {"urn:ietf:params:oauth:grant-type:token-exchange"},
+		"client_id":     {cfg.ClientID},
+		"subject_token": {subjectToken},
 		// KC Standard Token Exchange V2 บังคับ subject_token_type (RFC 8693) — ถ้าไม่ส่ง
 		// ได้ error "Parameter 'subject_token_type' required for standard token exchange"
 		"subject_token_type": {"urn:ietf:params:oauth:token-type:access_token"},
@@ -273,7 +274,7 @@ func Register(app *fiber.App, cfg Config) {
 				exchanged, xerr := exchangeToken(cfg, tok)
 				if xerr == nil {
 					setCookie(c, "cis_session", exchanged.AccessToken)
-					setCookie(c, "sso_bound", tk) // ผูก session กับตั๋ว — logout กลาง propagate ผ่านตั๋ว
+					setCookie(c, "sso_bound", tk)                                                                                    // ผูก session กับตั๋ว — logout กลาง propagate ผ่านตั๋ว
 					c.Cookie(&fiber.Cookie{Name: "sso_try_cis", Value: "1", Path: "/", HTTPOnly: true, SameSite: "Lax", MaxAge: 30}) // กันวน loop
 					return c.Redirect("/", fiber.StatusFound)
 				}
@@ -477,41 +478,10 @@ func revokeSSOTicket(cfg Config, sessionToken, ticket string) {
 	log.Printf("sso ticket revoked (http %d)", resp.StatusCode)
 }
 
-// TicketAlive — เวอร์ชัน export ของ ticketAlive (ให้ handler package ใช้; base อ่านจาก env)
+// TicketAlive — ตรวจกับ ID กลางว่า session ที่ผูกกับตั๋วยังมีชีวิต (logout กลาง propagate)
+// นโยบาย (timeout, fail-open) อยู่ที่ SDK central/auth-go — ทุก service ใช้ชุดเดียวกัน
 func TicketAlive(ticket string) bool {
-	return ticketAlive(Config{
-		SttBrokerBase: os.Getenv("IDPORTAL_INTERNAL_BASE"),
-		ClientID:      "cis-web",
-	}, ticket)
-}
-
-// ticketAlive — ตรวจกับ ID กลางว่า session ที่ผูกกับตั๋วยังมีชีวิต (logout กลาง propagate)
-// false เมื่อตั๋วถูก revoke/logout-all/หมดอายุ; ตรวจไม่ได้ → true (fail-open)
-func ticketAlive(cfg Config, ticket string) bool {
-	if ticket == "" {
-		return true
-	}
-	form := url.Values{"ticket": {ticket}}
-	req, err := http.NewRequest(http.MethodPost, cfg.SttBrokerBase+"/sso/check", strings.NewReader(form.Encode()))
-	if err != nil {
-		return true
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return true
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return true
-	}
-	var out struct {
-		Alive bool `json:"alive"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return true
-	}
-	return out.Alive
+	return auth.TicketAlive(os.Getenv("IDPORTAL_INTERNAL_BASE"), ticket)
 }
 
 // logoutAllSSO — ขอ ID กลางยกเลิก "ทุก" ตั๋ว SSO (logout กลาง global) — best-effort

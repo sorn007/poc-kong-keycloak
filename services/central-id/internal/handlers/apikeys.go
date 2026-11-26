@@ -1,10 +1,10 @@
 // Central API Keys — หน้าจอ + API สำหรับออก API key ที่ผูก scope
-// • หน้า UI: GET /apikeys (ต้อง login — cookie central_session)
-// • สร้าง: POST /apikeys/create (form: name, scopes=comma list) — auth: session cookie หรือ Bearer
-// • รายการ: GET /apikeys/list (JSON, เฉพาะของเจ้าของ — key mask)
-// • ยกเลิก: POST /apikeys/revoke (form: id)
-// • ตรวจสำหรับ Kong/MCP: POST /apikeys/validate (form: key) → {active, owner, scopes}
-//   ← endpoint เดียวกันคือ "contract" ที่ MCP server ใช้ได้ทันที (key คือความลับ — ไม่ต้อง auth เพิ่ม)
+//   - หน้า UI: GET /apikeys (ต้อง login — cookie central_session)
+//   - สร้าง: POST /apikeys/create (form: name, scopes=comma list) — auth: session cookie หรือ Bearer
+//   - รายการ: GET /apikeys/list (JSON, เฉพาะของเจ้าของ — key mask)
+//   - ยกเลิก: POST /apikeys/revoke (form: id)
+//   - ตรวจสำหรับ Kong/MCP: POST /apikeys/validate (form: key) → {active, owner, scopes}
+//     ← endpoint เดียวกันคือ "contract" ที่ MCP server ใช้ได้ทันที (key คือความลับ — ไม่ต้อง auth เพิ่ม)
 package handlers
 
 import (
@@ -13,8 +13,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
+	"central/auth-go"
 	"central/central-id/internal/apikeys"
-	"central/central-id/internal/auth"
 	"central/central-id/internal/sso"
 	"central/central-id/internal/web"
 )

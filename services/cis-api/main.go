@@ -8,7 +8,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	"central/cis-api/internal/auth"
+	"central/auth-go"
+	authmw "central/auth-go/fibermw"
 	"central/cis-api/internal/handlers"
 	"central/cis-api/internal/oidc"
 )
@@ -39,10 +40,10 @@ func main() {
 	}
 
 	oidcCfg := oidc.Config{
-		Issuer:        cfg.Issuer,
-		InternalBase:  cfg.InternalBase,
-		Realm:         cfg.Realm,
-		ClientID:      "cis-web",
+		Issuer:       cfg.Issuer,
+		InternalBase: cfg.InternalBase,
+		Realm:        cfg.Realm,
+		ClientID:     "cis-web",
 		// cis-web เป็น confidential client (มี secret) — ใช้กับ token endpoint ทั้ง AC flow
 		// และ Token Exchange (KC V2 อนุญาตเฉพาะ confidential client เท่านั้น)
 		ClientSecret:  env("CIS_CLIENT_SECRET", ""),
@@ -75,17 +76,17 @@ func main() {
 	oidc.Register(app, oidcCfg)
 
 	// เส้นทางเป้าหมาย — central token + scope
-	app.Get("/projects", auth.CentralAuth(jwks, cfg), auth.Scope("projects.read"), handlers.ProjectsList())
-	app.Post("/projects", auth.CentralAuth(jwks, cfg), auth.Scope("projects.write"), handlers.ProjectsCreate())
+	app.Get("/projects", authmw.CentralAuth(jwks, cfg), authmw.Scope("projects.read"), handlers.ProjectsList())
+	app.Post("/projects", authmw.CentralAuth(jwks, cfg), authmw.Scope("projects.write"), handlers.ProjectsCreate())
 
 	// Dual Validation — รับทั้ง central และ legacy token (ช่วง migration)
-	app.Get("/projects/dual", auth.DualAuth(jwks, cfg), handlers.ProjectsList())
+	app.Get("/projects/dual", authmw.DualAuth(jwks, cfg), handlers.ProjectsList())
 
 	// Legacy เท่านั้น — พฤติกรรมระบบเดิมก่อน migration
-	app.Get("/projects/legacy", auth.LegacyAuth(cfg), handlers.ProjectsList())
+	app.Get("/projects/legacy", authmw.LegacyAuth(cfg), handlers.ProjectsList())
 
 	// เส้นทาง Open API
-	app.Get("/open-api/projects", auth.CentralAuth(jwks, cfg), auth.Scope("projects.read"), handlers.OpenApiProjects())
+	app.Get("/open-api/projects", authmw.CentralAuth(jwks, cfg), authmw.Scope("projects.read"), handlers.OpenApiProjects())
 
 	// หน้า demo ที่ตรวจ token จาก cookie ด้วย central validation
 	app.Get("/projects/page", handlers.ProjectsPage(jwks, cfg))
@@ -93,6 +94,6 @@ func main() {
 	// DEV ONLY — mint legacy token ให้ test script
 	app.Post("/dev/mint-legacy-token", handlers.MintLegacyToken(cfg, devMode))
 
-	log.Printf("cis-api (Go Fiber) listening :%s — audience=%s devMode=%v", port, cfg.Audience, devMode)
+	log.Printf("cis-api (Go Fiber) listening :%s — audience=%s devMode=%v auth-sdk=%s", port, cfg.Audience, devMode, auth.Version)
 	log.Fatal(app.Listen(":" + port))
 }

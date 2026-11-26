@@ -15,7 +15,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	"central/central-id/internal/auth"
+	"central/auth-go"
 	"central/central-id/internal/handlers"
 	"central/central-id/internal/sso"
 )
@@ -24,9 +24,9 @@ type Config struct {
 	Issuer        string
 	InternalBase  string
 	Realm         string
-	ClientID      string // central-id-portal
-	ClientSecret  string // central-id-portal เป็น confidential (Token Exchange ของตั๋ว SSO)
-	FrontURL      string // http://localhost:3000
+	ClientID      string          // central-id-portal
+	ClientSecret  string          // central-id-portal เป็น confidential (Token Exchange ของตั๋ว SSO)
+	FrontURL      string          // http://localhost:3000
 	SSOStore      sso.TicketStore // broker ในตัว — portal redeem ตั๋วของตัวเองผ่าน store ตรง (ไม่ยิง HTTP หาตัวเอง)
 	Keyfunc       auth.Keyfunc
 	ClientSecrets map[string]string // secret ของ confidential client ต้นทาง — ใช้ renew ตอน redeem
@@ -157,9 +157,8 @@ func audContains(list []string, want string) bool {
 
 // ชื่อ cookie กลางของระบบ SSO ticket
 const ssoCookieName = "central_sso"
-const ssoBoundName  = "sso_bound"
-const ssoTryName    = "sso_try_portal"
-
+const ssoBoundName = "sso_bound"
+const ssoTryName = "sso_try_portal"
 
 func Register(app *fiber.App, cfg Config) {
 	app.Get("/auth/login", func(c *fiber.Ctx) error {
@@ -170,7 +169,7 @@ func Register(app *fiber.App, cfg Config) {
 			if st == "ok" && audContains(aud, cfg.ClientID) {
 				if ex, xerr := exchangeTokenForSelf(cfg, tok); xerr == nil {
 					setCookie(c, "central_session", ex.AccessToken)
-					setCookie(c, ssoBoundName, tk) // ผูก session กับตั๋ว — logout กลาง propagate ผ่านตั๋ว
+					setCookie(c, ssoBoundName, tk)                                                                                // ผูก session กับตั๋ว — logout กลาง propagate ผ่านตั๋ว
 					c.Cookie(&fiber.Cookie{Name: ssoTryName, Value: "1", Path: "/", HTTPOnly: true, SameSite: "Lax", MaxAge: 30}) // กันวน loop
 					return c.Redirect("/", fiber.StatusFound)
 				}

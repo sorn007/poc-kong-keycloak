@@ -15,7 +15,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	"central/central-id/internal/auth"
+	"central/auth-go"
 	"central/central-id/internal/sso"
 	"central/central-id/internal/stt"
 	"central/central-id/internal/web"

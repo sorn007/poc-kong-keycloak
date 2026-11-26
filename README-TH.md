@@ -107,6 +107,7 @@ JWT Access Token แบบ **RS256** ที่ Keycloak ออกให้:
 > **Central API Keys** — ผู้ใช้ออก API key ผูก scope จากหน้า /apikeys ของ ID Portal (:3000) — key (header `apikey` หรือ `X-API-Key` — รองรับทั้งคู่) ใช้กับ Kong route `/openapi/apikey/*` และ MCP server (ตรวจผ่าน POST /apikeys/validate — contract เดียวกับ Kong plugin) — ดู ADR-005
 > **Kong plugins แบบ thin wrapper** — custom plugins ทั้ง 3 (`oidc-central`, `oidc-introspect`, `central-apikey`) ใช้ Lua library กลางร่วมกัน (`kong/lib/central_common/` — cache/HTTP/claims/JWKS/error) · dependency ที่แตะ Kong-internal (`jwt_parser`) ถูก isolate ในไฟล์ lib เดียว — อัปเกรด Kong แก้จุดเดียว — ดู ADR-006
 > **กลไก session exchange แกนเดียว** — SSO Ticket (reusable, 30 นาที, renew ได้) และ STT code (one-time, 60 วิ, ผูกปลายทาง) วิ่งบน engine เดียวกัน `ticketcore` (2 policies × 2 store backends: memory/Redis) — ดู ADR-007
+> **Guard อยู่ใน SDK กลาง** — service ไม่ถือสำเนา Guard ของตัวเองแล้ว: `@central/auth-nestjs` และ `central/auth-go` เป็น policy การตรวจ token/scope/gateway-trust/ticket ที่เดียว — ดู ADR-008 และ §5
 > **Headless App (CIBA)** เป็น confidential client (`oidc.ciba.grant.enabled=true`) — แอปทำหน้า login เอง ไม่ redirect ไป Keycloak เลย (ผู้ใช้ยืนยันผ่านอุปกรณ์ ID :3040) — token มี aud=buyer-api ผ่าน identity-buyer-web ใช้กับ Buyer API เดิมได้ทันที — รายละเอียด: research-headless-auth.md
 > **Mobile App** เป็น public client (ไม่มี secret) — บังคับ **PKCE S256** ที่ server, login ผ่าน system browser ตาม RFC 8252 (ไม่ใช้ WebView), refresh token rotation + reuse detection (ขโมย token เก่า → ยกเลิกทั้งตระกูล) — รายละเอียดทดสอบที่ `scripts/mobile-test.sh`
 
@@ -144,9 +145,13 @@ poc-kong-keycloak/
 │   └── custom/                      ← Custom Kong plugins (Lua) แบบ thin + shared lib:
 │                                        kong/lib/central_common/ (cache/http/req/claims/resp/jwks — ADR-006)
 │                                        kong/plugins/ · oidc-central · oidc-introspect · central-apikey
+├── packages/                        ← library กลางที่ service ใช้ร่วมกัน (ADR-008):
+│   ├── auth-nestjs/                 ← @central/auth-nestjs — Central Auth SDK สำหรับ NestJS
+│   │                                  (guards, verifiers, gateway-trust, ticket liveness, API key)
+│   └── auth-go/                     ← central/auth-go — Central Auth SDK สำหรับ Go (+ fibermw สำหรับ Fiber)
 ├── services/
-│   ├── buyer-api/                   ← Mock Buyer (NestJS): Central Guard + Legacy + Dual + OIDC/PKCE
-│   └── cis-api/                     ← Mock CIS (Go Fiber): Central Middleware + Legacy + Dual
+│   ├── buyer-api/                   ← Mock Buyer (NestJS): ใช้ @central/auth-nestjs + OIDC/PKCE + MCP server (/mcp)
+│   └── cis-api/                     ← Mock CIS (Go Fiber): ใช้ central/auth-go (Central + Legacy + Dual)
 ├── scripts/
 │   ├── _lib.sh                      ← Helper ร่วมของ scripts (token, check, summary)
 │   ├── setup.sh                     ← (ครั้งแรก) import realm → ดึง public key → สร้าง kong.yml → ขึ้น stack
@@ -162,8 +167,25 @@ poc-kong-keycloak/
     ├── migration-plan.md            ← แผน Migration Option A/B สู่ Production
     ├── research-headless-auth.md    ← Research ความเป็นไปได้ Headless Auth (CIBA vs Custom Extension)
     ├── (services: central-id :3000 · headless-demo :3030 · id-device :3040 · fintech-web :3050 — Embedded Login exception demo)
-    └── ADR-001/002/003/004          ← การตัดสินใจสถาปัตยกรรม (IdP / Token Contract / Kong / STT+Token Exchange)
+    ├── ADR-001..008                 ← การตัดสินใจสถาปัตยกรรม (IdP / Token Contract / Kong / STT+Token Exchange /
+    │                                  Kong gateway evolution / Kong shared lib / ticketcore / Unified Auth SDK)
 ```
+
+### Central Auth SDK กลาง (`packages/`)
+
+เดิมแต่ละ service ถือสำเนา Guard/Middleware ของตัวเอง จน policy เพี้ยนจากกันโดยไม่รู้ตัว (leeway, การบังคับ `exp`, การเคลียร์ cookie) — ตอนนี้ Authentication อยู่ใน internal package 2 ตัว ตามภาษา (ADR-008):
+
+| ความสามารถ | `@central/auth-nestjs` (Buyer + MCP) | `central/auth-go` (CIS, ID Portal, ID device, Fintech) |
+| ---------- | ------------------------------------ | ------------------------------------------------------ |
+| Central token: RS256 + allowlist `iss` + `aud` + บังคับมี `exp` | `createAuth()` → guards | `VerifyCentral` + `fibermw` |
+| Legacy HS256 + Dual Validation (allowlist ห้าม fallback) | ✅ | ✅ |
+| Gateway-trust (`X-Gateway-Auth` เทียบแบบ constant-time) | ✅ gateway controller | ✅ `VerifyGatewayTrust` (ยังไม่มี service Go ใช้) |
+| Ticket liveness — propagate logout (default fail-open) | `TicketGuard` | `TicketAlive` |
+| Central API Key สำหรับ MCP (ตรวจทุก request, fail-closed) | `ApiKeyVerifier` | — |
+
+Service ระบุเฉพาะ "ตัวตนของตัวเอง" (issuer / audience / JWKS URL + legacy secret — ดู `services/buyer-api/src/central-auth.ts`) · Authorization ระดับ business (tenant, orders/projects) ยังอยู่ที่ service เอง · SDK build ภายใน Docker image (compose `additional_contexts`) ผู้ใช้ไม่ต้องทำ step เพิ่ม · ทุก service log รุ่นของ SDK ตอน startup (`auth-sdk=0.1.0`)
+
+**แก้ SDK:** แก้ที่ `packages/…` → รัน unit test ของมัน (`go test ./...` / `npm test`) → rebuild service ที่เกี่ยว (`docker compose build buyer-api cis-api …`) — ใน POC dependency ชี้ path ใน repo จึงได้ SDK รุ่นล่าสุดทันทีเมื่อ rebuild · ถ้าต้องการให้แต่ละ service pin เวอร์ชันแยกกัน ให้ publish ขึ้น private registry / Go module tag · ถ้ารัน service NestJS บนเครื่องแทน Docker ต้องลบสำเนา SDK ที่ติดตั้งไว้ก่อน (`rm -rf node_modules/@central/auth-nestjs && npm install`) — npm ไม่ refresh dependency แบบ `file:` เมื่อมีแค่ source ของ SDK เปลี่ยน
 
 ## 6. ขั้นตอนการทำ POC (Phases)
 
@@ -179,16 +201,19 @@ poc-kong-keycloak/
 | 8 | Revocation & Logout — revoke token, disable user, logout กลาง | ทุกระบบปฏิเสธ token ตาม SLA (ไม่เกิน token lifetime) | ✅ |
 | 9 | Dual Validation — legacy token + central token พร้อมกัน | Code เดิมยังทำงานได้ระหว่าง migration | ✅ |
 | 10 | สรุปผล + แผน Migration Option A/B | เอกสารเสนอทีม | ✅ |
-| 11 | Extension: Headless CIBA (Phase 0 pilot จาก research) + Fintech Embedded Login + Brute Force + STT ข้ามแอป + SSO Ticket (เปิดแท็บใหม่ไม่ login) | `ciba-test.sh` 16/16 · `fintech-test.sh` 5/5 · `stt-test.sh` 33/33 | ✅ |
+| 11 | Extension: Headless CIBA (Phase 0 pilot จาก research) + Fintech Embedded Login + Brute Force + STT ข้ามแอป + SSO Ticket (เปิดแท็บใหม่ไม่ login) | `ciba-test.sh` 16/16 · `fintech-test.sh` 5/5 · `stt-test.sh` 42/42 | ✅ |
 | 12 | Central API Keys (ออก key ผูก scope จาก ID Portal) + custom Kong plugins (gateway OIDC/introspection) + MCP Server + portal routing + i18n EN/ไทย | `openapi-test.sh` 31/31 · `mcp-test.sh` 12/12 | ✅ |
 | 12 | Central API Keys (ออก key ผูก scope จาก ID Portal) + custom Kong plugins (gateway OIDC/introspection) + MCP Server + portal routing + i18n EN/ไทย | `openapi-test.sh` 31/31 · `mcp-test.sh` 12/12 | ✅ |
 
-> **สถานะ (2026-11-25):** ทดสอบครบทุก Phase แล้ว — **15 scripts, 162/162 checks PASS จาก 11 test suites** (sweep ครบบน store backend **Redis** ตัวใหม่: smoke/SSO/openapi/MCP/revocation/dual-validation/mobile/CIBA/Fintech/STT v2 — รายละเอียด + สิ่งที่พบที่ [docs/test-results.md](docs/test-results.md)) · **ผล audit ซอร์สโค้ด** ตอบคำถาม reviewer 4 ข้อ (ticket broker/restart, session guard, STT atomic, token exchange): [docs/SECURITY-AUDIT.md](docs/SECURITY-AUDIT.md) — gap "restart = kick session ทุกคน" ปิดแล้วด้วย `STORE_BACKEND=redis` (พิสูจน์ด้วย restart test จริง) เหลือเฉพาะ browser demo ด้วยมือ (checklist ใน test-results §3) และเคส Tenant reject เมื่อ tenant ไม่ใช่ hardcoded (⚠️ ดู §1 ข้อ 7)
+> **สถานะ (2026-11-25):** ทดสอบครบทุก Phase แล้ว — **15 scripts, 170/170 checks PASS จาก 11 test suites** (sweep ครบบน store backend **Redis** ตัวใหม่: smoke/SSO/openapi/MCP/revocation/dual-validation/mobile/CIBA/Fintech/STT v2 — รายละเอียด + สิ่งที่พบที่ [docs/test-results.md](docs/test-results.md)) · **ผล audit ซอร์สโค้ด** ตอบคำถาม reviewer 4 ข้อ (ticket broker/restart, session guard, STT atomic, token exchange): [docs/SECURITY-AUDIT.md](docs/SECURITY-AUDIT.md) — gap "restart = kick session ทุกคน" ปิดแล้วด้วย `STORE_BACKEND=redis` (พิสูจน์ด้วย restart test จริง) เหลือเฉพาะ browser demo ด้วยมือ (checklist ใน test-results §3) และเคส Tenant reject เมื่อ tenant ไม่ใช่ hardcoded (⚠️ ดู §1 ข้อ 7)
 
 ## 7. วิธีรัน (เมื่อ Scaffold แล้ว)
 
 ```bash
 # 0) ตั้งค่าครั้งแรก
+#    ข้อกำหนด: Docker ที่มี plugin Docker Compose v2 และเปิด BuildKit (default ของ Docker Desktop รุ่นใหม่)
+#    ใช้ `docker-compose` v1 ตัวเก่าไม่ได้ — ทุก service build ร่วมกับ SDK กลาง (packages/)
+#    ผ่าน compose `additional_contexts` · ตรวจได้ด้วย `bash scripts/00-check-env.sh`
 cp .env.example .env          # แก้รหัสผ่าน/secret ตามต้องการ
 bash scripts/setup.sh         # import realm → ดึง public key → สร้าง kong.yml → ขึ้น stack ทั้งหมด
 bash scripts/00-check-env.sh  # ตรวจว่าเครื่องพร้อม
@@ -328,6 +353,7 @@ POC นี้เริ่มจาก user ใน Keycloak ก่อน แล�
 | ----- | ------ | ------ |
 | port 3000 ถูกใช้ (Windows) | node process ค้าง | `netstat -ano \| findstr :3000` → `taskkill /F /PID <pid>` |
 | request ผ่าน Kong ช้า 4-8 วิ | Kong default DNS order ลอง SRV ก่อนแล้วโดน SERVFAIL บน Docker Desktop | ตั้ง `KONG_DNS_ORDER: "A"` ใน compose (ตั้งไว้แล้ว) |
+| `docker compose up` ล้มที่ `additional_contexts` / "requires BuildKit" | Compose เก่า (v1 หรือ v2 รุ่นก่อนมี `additional_contexts`) หรือปิด BuildKit — service ต้อง build ร่วมกับ SDK กลางผ่าน build context เพิ่ม | อัปเกรด plugin Docker Compose v2 และเปิด BuildKit (อย่าตั้ง `DOCKER_BUILDKIT=0`) · `bash scripts/00-check-env.sh` บอกข้อที่ขาด |
 | Kong start ไม่ขึ้น: `table index is nil` (declarative) | บั๊ก Kong 3.9 กับ config หลาย entity ซ้อน | `setup.sh` ฉีด explicit `id` ทุก entity แล้ว — rerun `bash scripts/setup.sh` |
 | `buyer-user` 401 ระหว่างรัน test ซ้ำ ๆ | brute-force protection ล็อกบัญชี (ตามดีไซน์) | ปลดผ่าน Admin API: `DELETE /admin/realms/central/attack-detection/brute-force/users/buyer-user` |
 | MCP client ได้ 401 | ไม่มี/ผิด API key header | ส่ง `apikey: central_…` (ออกที่ ID Portal → API Keys) |

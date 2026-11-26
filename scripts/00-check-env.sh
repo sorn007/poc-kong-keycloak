@@ -10,6 +10,27 @@ miss() { echo "MISS $1 → $2"; FAIL=$((FAIL + 1)); }
 
 command -v docker >/dev/null 2>&1 && ok "docker ($(docker --version 2>/dev/null | sed 's/Docker version //;s/,.*//'))" ||
   miss "docker" "ติดตั้ง Docker Desktop"
+
+# Docker Compose v2 + BuildKit — service ทุกตัว build ร่วมกับ SDK กลาง (packages/) ผ่าน
+# build.additional_contexts (ADR-008): ใช้ docker-compose v1 ไม่ได้ และต้องมี BuildKit
+# ตรวจ "ความสามารถจริง" โดยให้ compose อ่านไฟล์ที่มี additional_contexts (แทนการเทียบเลขเวอร์ชัน)
+if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+  PROBE_DIR="$(mktemp -d)"
+  printf 'services:\n  probe:\n    build:\n      context: .\n      additional_contexts:\n        sdk: .\n' > "$PROBE_DIR/compose.yaml"
+  if docker compose -f "$PROBE_DIR/compose.yaml" config -q >/dev/null 2>&1; then
+    ok "docker compose v2 ($(docker compose version --short 2>/dev/null)) — รองรับ build.additional_contexts"
+  else
+    miss "docker compose (build.additional_contexts)" "อัปเกรด Docker Compose v2 เป็นรุ่นล่าสุด (มาพร้อม Docker Desktop รุ่นใหม่) — docker-compose v1 ใช้กับ repo นี้ไม่ได้"
+  fi
+  rm -rf "$PROBE_DIR"
+else
+  miss "docker compose v2" "ติดตั้ง Docker Compose v2 (plugin ของ Docker — ไม่ใช่ docker-compose ตัวเก่า)"
+fi
+if docker buildx version >/dev/null 2>&1 && [ "${DOCKER_BUILDKIT:-1}" != "0" ]; then
+  ok "buildkit ($(docker buildx version 2>/dev/null | awk '{print $2}'))"
+else
+  miss "buildkit" "การ build ต้องใช้ BuildKit (ติดตั้ง buildx plugin และอย่าตั้ง DOCKER_BUILDKIT=0)"
+fi
 command -v jq >/dev/null 2>&1 && ok "jq ($(jq --version))" ||
   { command -v docker >/dev/null 2>&1 && ok "jq (ผ่าน docker fallback ghcr.io/jqlang/jq)"; } ||
   miss "jq" "ติดตั้ง jq (https://jqlang.org/download/)"

@@ -43,6 +43,22 @@ expect_contains() {
   fi
 }
 
+redirect_loop() {
+  # redirect_loop URL COOKIE_JAR — หน้า page นี้วน redirect ไม่รู้จบหรือไม่ (เช่น / → / → /)
+  # curl -L ยอมแพ้เงียบ ๆ เมื่อชนขีดจำกัด (exit 47) และ check ที่ grep เนื้อหาอย่างเดียวจะ "ผ่าน"
+  # โดยไม่เห็น loop — จึงต้องดู exit code ตรง ๆ · คืน "yes" = วน (ปัญหา) · "no" = ปกติ
+  local rc=0
+  curl -s -b "$2" --max-redirs 10 -L -o /dev/null "$1" || rc=$?
+  [ "$rc" -eq 47 ] && echo yes || echo no
+}
+
+clears_cookie() {
+  # clears_cookie URL COOKIE_JAR NAME — response แรก (ไม่ตาม redirect) สั่งลบ cookie NAME หรือไม่
+  # ใช้ยืนยันว่าเมื่อตั๋ว SSO ตาย หน้า page เคลียร์ cookie ของ session จริง ไม่ใช่แค่ redirect ทิ้ง
+  # (ไม่ใช้ -c → jar ต้นทางไม่ถูกแก้ เรียกซ้ำกับ jar เดียวกันได้) · คืน "yes" / "no"
+  curl -s -b "$2" -o /dev/null -D - "$1" | grep -qi "^set-cookie: $3=;" && echo yes || echo no
+}
+
 summary() {
   echo
   echo "======================================================"

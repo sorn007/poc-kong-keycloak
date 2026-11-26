@@ -1,0 +1,31 @@
+{
+  "name": "@central/auth-nestjs",
+  "version": "0.1.0",
+  "description": "Central Auth SDK for NestJS services: central/legacy token verification, Nest guards, gateway-trust, ticket liveness, Central API Key (ADR-008)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.js"
+  },
+  "dependencies": {
+    "jose": "^5.9.6",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "peerDependencies": {
+    "@nestjs/common": "^10.0.0 || ^11.0.0"
+  },
+  "devDependencies": {
+    "@nestjs/common": "^10.4.15",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^22.10.0",
+    "reflect-metadata": "^0.2.2",
+    "typescript": "^5.7.2"
+  }
+}

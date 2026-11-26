@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"central/auth-go"
 	"github.com/gofiber/fiber/v2"
 
 	"central/fintech-web/internal/kc"
@@ -198,7 +199,7 @@ func Home(cfg kc.Config, store *session.Store) fiber.Handler {
 		}
 		// Logout กลาง propagate — session ผูกกับตั๋ว SSO: ตั๋วถูก revoke/logout-all ที่ไหนก็ได้
 		// → session นี้ตายทันทีที่ถูกเรียกใช้ (authN ยัง verify JWT เองจาก JWKS — ตรงนี้คือ liveness ของ SSO)
-		if sess.SSOTicket != "" && !ssoTicketAlive(sess.SSOTicket) {
+		if sess.SSOTicket != "" && !auth.TicketAlive(sttBrokerBase, sess.SSOTicket) {
 			store.Remove(sess.ID)
 			c.ClearCookie(cookieName)
 			c.ClearCookie(ssoCookie)
@@ -573,7 +574,6 @@ func STTLogin(cfg kc.Config, store *session.Store) fiber.Handler {
 	}
 }
 
-
 // ssoCookie — cookie ตั๋ว SSO ของ host localhost (ไม่ผูก port — browser ส่งให้ทุกแอปบน host เดียวกัน)
 const ssoCookie = "central_sso"
 
@@ -614,32 +614,6 @@ func issueSSOTicket(c *fiber.Ctx, accessToken, refreshToken, clientID string) st
 	})
 	log.Printf("sso ticket issued to browser")
 	return out.Ticket
-}
-
-// ssoTicketAlive — ตรวจกับ ID กลางว่าตั๋วยังมีชีวิตอยู่ไหม (propagate logout กลาง)
-// false เมื่อตั๋วถูก revoke / logout-all / หมดอายุ — ปลายทางควรเคลียร์ session ทันที
-func ssoTicketAlive(ticket string) bool {
-	if ticket == "" {
-		return true // ไม่ผูกตั๋ว (เช่น login ก่อนมีระบบตั๋ว) — ไม่ต้องตรวจ
-	}
-	req, err := http.NewRequest(http.MethodPost, sttBrokerBase+"/sso/check",
-		strings.NewReader(url.Values{"ticket": {ticket}}.Encode()))
-	if err != nil {
-		return true // ตรวจไม่ได้ → ไม่ล็อกคน (fail-open — production ควร fail-closed ตามนโยบาย)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return true
-	}
-	defer resp.Body.Close()
-	var out struct {
-		Alive bool `json:"alive"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return true
-	}
-	return out.Alive
 }
 
 // ssoLogoutAll — ขอ ID กลางยกเลิก "ทุก" ตั๋ว SSO (logout กลางแบบ global) — best-effort

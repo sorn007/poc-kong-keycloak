@@ -144,8 +144,15 @@ printf '.localhost\tFALSE\t/\tFALSE\t0\tcentral_sso\t%s\n' "$TICKET3" > "$JARC3"
 curl -s -c "$JARC3" -b "$JARC3" -L -o /dev/null "http://localhost:3020/"
 grep -q cis_session "$JARC3" && check "CIS ได้ session จากตั๋ว (ผูก sso_bound)" "yes" "yes" || check "CIS session จากตั๋ว" "yes" "no"
 curl -s -c "$JARF3" -b "$JARF3" -L -o /dev/null "$FT/logout"
+# ตรวจ "response แรก" ของหน้า page ตรง ๆ จากสำเนา jar ก่อนถูกเคลียร์ — curl -L ปกติยอมแพ้เงียบ ๆ
+# เมื่อวน redirect และ check ที่ grep เนื้อหาอย่างเดียวจะผ่านโดยไม่เห็น loop (ดู _lib.sh: redirect_loop)
+JARC4=$(mktemp); cp "$JARC3" "$JARC4"
 curl -s -c "$JARC3" -b "$JARC3" -L -o /tmp/lo-cis.html "http://localhost:3020/"
 check "logout ที่ fintech -> CIS session เดิมตายตาม (propagate)" "yes" "$(grep -q 'ล็อกอินผ่าน ID อยู่' /tmp/lo-cis.html && echo no || echo yes)"
+check "logout ที่ fintech -> หน้า / ของ CIS เคลียร์ cookie session จริง" "yes" "$(clears_cookie "http://localhost:3020/" "$JARC4" cis_session)"
+check "logout ที่ fintech -> หน้า / ของ CIS ไม่วน redirect" "no" "$(redirect_loop "http://localhost:3020/" "$JARC4")"
+check "logout ที่ fintech -> /projects/page ของ CIS เคลียร์ cookie session จริง" "yes" "$(clears_cookie "http://localhost:3020/projects/page" "$JARC4" cis_session)"
+check "logout ที่ fintech -> /projects/page ของ CIS ไม่วน redirect" "no" "$(redirect_loop "http://localhost:3020/projects/page" "$JARC4")"
 # ทิศกลับ: login fintech ใหม่ → CIS SSO ใหม่ (มี session) → logout ที่ CIS (global) → fintech ตายตาม
 curl -s -c "$JARF3" -b "$JARF3" -L -o /dev/null --data-urlencode "username=buyer-user" --data-urlencode "password=$TEST_USER_PASSWORD" "$FT/login"
 TICKET4=$(awk '/central_sso/{print $7}' "$JARF3")
@@ -163,10 +170,15 @@ CODEB=$(echo "$LOCB" | sed -n 's/.*code=\([^&]*\).*/\1/p')
 curl -s -c "$JARF4" -b "$JARF4" -L -o /dev/null "http://localhost:3010/auth/stt?code=$CODEB"
 check "กดปุ่มไป Buyer (STT) -> session ผูกตั๋ว (sso_bound)" "yes" "$(grep -q sso_bound "$JARF4" && echo yes || echo no)"
 curl -s -c "$JARF4" -b "$JARF4" -L -o /dev/null "$FT/logout"
+JARB5=$(mktemp); cp "$JARF4" "$JARB5"   # สำเนา jar ขณะ session ยังอยู่แต่ตั๋วตายแล้ว — ใช้ตรวจ response แรกของหน้า page
 curl -s -c "$JARF4" -b "$JARF4" -L -o /tmp/lo-buyer.html "http://localhost:3010/"
 check "logout กลางที่ fintech -> Buyer (จากปุ่ม STT) ตายตามด้วย" "yes" "$(grep -q 'ล็อกอินผ่าน ID อยู่' /tmp/lo-buyer.html && echo no || echo yes)"
-rm -f "$JARF4" /tmp/lo-buyer.html
-rm -f "$JARF3" "$JARC3" /tmp/lo-cis.html /tmp/lo-ft.html
+check "ตั๋วตาย -> หน้า / ของ Buyer เคลียร์ cookie session จริง (ไม่ค้าง session เดิม)" "yes" "$(clears_cookie "http://localhost:3010/" "$JARB5" buyer_session)"
+check "ตั๋วตาย -> หน้า / ของ Buyer ไม่วน redirect กลับ / ซ้ำ" "no" "$(redirect_loop "http://localhost:3010/" "$JARB5")"
+check "ตั๋วตาย -> /orders/page ของ Buyer เคลียร์ cookie session จริง" "yes" "$(clears_cookie "http://localhost:3010/orders/page" "$JARB5" buyer_session)"
+check "ตั๋วตาย -> /orders/page ของ Buyer ไม่วน redirect" "no" "$(redirect_loop "http://localhost:3010/orders/page" "$JARB5")"
+rm -f "$JARF4" "$JARB5" /tmp/lo-buyer.html
+rm -f "$JARF3" "$JARC3" "$JARC4" /tmp/lo-cis.html /tmp/lo-ft.html
 rm -f "$JARF2" "$JART" "$JART3" /tmp/sso-cis.html /tmp/sso-buyer.html /tmp/sso-after.html
 
 rm -f /tmp/stt-*.html /tmp/stt-*.json /tmp/stt-*.code "$JAR" "$JARC" "$JARF"

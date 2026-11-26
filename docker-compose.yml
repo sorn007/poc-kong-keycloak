@@ -107,7 +107,11 @@ services:
     networks: [central-net]
 
   buyer-api:
-    build: ./services/buyer-api
+    build:
+      context: ./services/buyer-api
+      # Central Auth SDK — build ร่วมกับ service (ADR-008)
+      additional_contexts:
+        auth-nestjs: ./packages/auth-nestjs
     container_name: poc-buyer-api
     environment:
       PORT: "3000"
@@ -128,7 +132,11 @@ services:
 
   # แอป Central ID (บัญชีกลาง) — OIDC client หนึ่งของ Keycloak (central-id-portal)
   central-id:
-    build: ./services/central-id
+    build:
+      context: ./services/central-id
+      # Central Auth SDK — build ร่วมกับ service (ADR-008)
+      additional_contexts:
+        auth-go: ./packages/auth-go
     container_name: poc-central-id
     environment:
       PORT: "3000"
@@ -171,7 +179,11 @@ services:
   # ID Device (AD = Authentication Device) — จำลอง "แอป ID บนมือถือ"
   # รับ authentication delegation request จาก Keycloak + หน้าอนุมัติ/ปฏิเสธ
   id-device:
-    build: ./services/id-device
+    build:
+      context: ./services/id-device
+      # Central Auth SDK — build ร่วมกับ service (ADR-008)
+      additional_contexts:
+        auth-go: ./packages/auth-go
     container_name: poc-id-device
     environment:
       PORT: "3000"
@@ -187,7 +199,11 @@ services:
   # Fintech App (Embedded Login exception demo) — มีฟอร์ม user/pass ของตัวเอง
   # backend ยิง Direct Grant ไป Keycloak server-to-server (credentials ไม่ผ่าน browser)
   fintech-web:
-    build: ./services/fintech-web
+    build:
+      context: ./services/fintech-web
+      # Central Auth SDK — build ร่วมกับ service (ADR-008)
+      additional_contexts:
+        auth-go: ./packages/auth-go
     container_name: poc-fintech-web
     environment:
       PORT: "3000"
@@ -204,7 +220,11 @@ services:
     networks: [central-net]
 
   cis-api:
-    build: ./services/cis-api
+    build:
+      context: ./services/cis-api
+      # Central Auth SDK — build ร่วมกับ service (ADR-008)
+      additional_contexts:
+        auth-go: ./packages/auth-go
     container_name: poc-cis-api
     environment:
       PORT: "3000"

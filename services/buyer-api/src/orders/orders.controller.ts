@@ -10,19 +10,24 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { config } from '../config';
-import { CentralAuthGuard } from '../auth/central-auth.guard';
-import { DualAuthGuard } from '../auth/dual-auth.guard';
-import { LegacyAuthGuard } from '../auth/legacy-auth.guard';
-import { RequireScope, ScopeGuard } from '../auth/scope.guard';
+import {
+  RequireScope,
+  clearSessionCookies,
+  requireLegacy,
+} from '@central/auth-nestjs';
+import { auth, ticketGuard } from '../central-auth';
 import { page, readSession, toastScript } from '../ui';
-import { clearSsoCookies, isTicketAlive } from '../auth/sso-guard';
 import { langOf, t } from '../i18n';
+
+// Route ช่วง migration ต้องมี guard ของ legacy/dual จริง ๆ — ถ้าถอด block `legacy` ใน
+// central-auth.ts ไปแล้วแต่ยังลบ route ไม่หมด บรรทัดถัดไปจะ throw ตอน startup พร้อมบอกสาเหตุ
+const { dual, legacy } = requireLegacy(auth);
 
 @Controller()
 export class OrdersController {
   // ปกติ — central token + scope (เส้นทางเป้าหมายหลัง migration)
   @Get('orders')
-  @UseGuards(CentralAuthGuard, ScopeGuard)
+  @UseGuards(auth.guards.central, auth.guards.scope)
   @RequireScope('orders.read')
   list(@Req() req: Request) {
     return { ok: true, auth: req.auth, orders: [orderDemo()] };
@@ -30,7 +35,7 @@ export class OrdersController {
 
   // ใช้ทดสอบ 403: partner-001 ไม่มี orders.write
   @Post('orders')
-  @UseGuards(CentralAuthGuard, ScopeGuard)
+  @UseGuards(auth.guards.central, auth.guards.scope)
   @RequireScope('orders.write')
   create(@Req() req: Request) {
     return { ok: true, created: true, by: req.auth?.subject };
@@ -38,14 +43,14 @@ export class OrdersController {
 
   // Dual Validation — รับทั้ง central และ legacy token (ช่วง migration)
   @Get('orders/dual')
-  @UseGuards(DualAuthGuard)
+  @UseGuards(dual)
   dual(@Req() req: Request) {
     return { ok: true, validatorResult: 'dual', auth: req.auth };
   }
 
   // Legacy เท่านั้น — พฤติกรรมระบบเดิมก่อน migration
   @Get('orders/legacy')
-  @UseGuards(LegacyAuthGuard)
+  @UseGuards(legacy)
   legacy(@Req() req: Request) {
     return { ok: true, validatorResult: 'legacy', auth: req.auth };
   }
@@ -53,7 +58,7 @@ export class OrdersController {
   // เส้นทาง Open API — ให้ Kong forward มา + ใช้เรียกตรงจาก script ได้
   // ตรวจ scope + tenant binding ของ principal (ผู้รับผิดชอบ tenant คือ Buyer เอง)
   @Get('open-api/orders')
-  @UseGuards(CentralAuthGuard, ScopeGuard)
+  @UseGuards(auth.guards.central, auth.guards.scope)
   @RequireScope('orders.read')
   openApi(@Req() req: Request) {
     const auth = req.auth;
@@ -82,9 +87,9 @@ export class OrdersController {
     // Logout กลาง propagate — session ผูกกับตั๋ว SSO: ตั๋วตาย → เคลียร์ + กลับ landing
     // (เพิ่มความสม่ำเสมอกับหน้า Home — ทุกหน้า page-render ตรวจ liveness ของตั๋ว)
     if (s && req.cookies?.['sso_bound']) {
-      const alive = await isTicketAlive(req.cookies['sso_bound']);
+      const alive = await ticketGuard.isAlive(req.cookies['sso_bound']);
       if (!alive) {
-        clearSsoCookies(res);
+        clearSessionCookies(res, 'buyer');
         return res.redirect('/auth/login');
       }
     }

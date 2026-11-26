@@ -3,6 +3,7 @@ import cookieParser from 'cookie-parser';
 import { NestFactory } from '@nestjs/core';
 import type { NextFunction, Request, Response } from 'express';
 import { AppModule } from './app.module';
+import { VERSION as AUTH_SDK_VERSION } from '@central/auth-nestjs';
 import { config } from './config';
 
 async function bootstrap() {
@@ -21,7 +22,7 @@ async function bootstrap() {
   await app.listen(config.port);
   // eslint-disable-next-line no-console
   console.log(
-    `buyer-api (NestJS) listening :${config.port} — audience=${config.audience} devMode=${config.devMode}`,
+    `buyer-api (NestJS) listening :${config.port} — audience=${config.audience} devMode=${config.devMode} auth-sdk=@central/auth-nestjs@${AUTH_SDK_VERSION}`,
   );
 }
 void bootstrap();
