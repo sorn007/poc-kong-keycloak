@@ -1,0 +1,5 @@
+# build context ของ @central/login-js (compose: additional_contexts.login-js)
+# สร้าง dist ใหม่ใน Docker เสมอ — ไม่เอา artifact ของเครื่อง host ปนเข้า image
+node_modules
+dist
+test

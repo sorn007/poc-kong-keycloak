@@ -15,6 +15,7 @@ flowchart TB
         BR["Browser (SSO cookie central_sso + lang)"]
         AG["AI Agent / MCP Client"]
         DEV["อุปกรณ์ ID (:3040)"]
+        SPA["Browser: Claw Web :3060<br/>SPA + @central/login-js (token ใน memory)"]
     end
 
     subgraph GW["Kong Gateway OSS :8000 (DB-less)"]
@@ -42,6 +43,8 @@ flowchart TB
     PG[(Postgres<br/>Keycloak state)]
 
     BR -->|"AC + PKCE (ผ่าน brokering)"| AS
+    SPA -->|"AC + PKCE S256 · token endpoint (CORS)"| AS
+    SPA -->|"Bearer → /openapi/oidc/orders"| K1
     AG -->|"apikey / Bearer central_…"| K3
     BR -->|"browser (SSO ticket)"| ID
     DEV -->|"CIBA approve"| AS
@@ -221,7 +224,47 @@ sequenceDiagram
     note over U,KC: token ต้นทาง (aud=buyer-api) ไม่มีทางใช้กับ CIS API ตรง ๆ<br/>— Token Exchange คือทางถูกต้องตามมาตรฐาน
 ```
 
-> ทดสอบ: `scripts/stt-test.sh` (33 checks) · ADR-004
+> ทดสอบ: `scripts/stt-test.sh` (42 checks) · ADR-004
+
+---
+
+## 7.1 Flow ที่ 7 — แอปในเบราว์เซอร์ (SPA) + Login SDK `@central/login-js`
+
+แอปที่ไม่มี backend ใช้ Guard ฝั่ง server ไม่ได้ — ทุกอย่างเกิดขึ้นในเบราว์เซอร์ผ่าน SDK ที่บังคับนโยบายชุดเดียวกับ service ฝั่ง server (PKCE S256, ตรวจ id_token ก่อนเชื่อ claims, ห้ามเชื่อค่าจากที่มาไม่ได้ตรวจ)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as ผู้ใช้
+    participant SPA as Claw Web :3060<br/>(static SPA + nginx)
+    participant SDK as @central/login-js<br/>(ในหน่วยความจำของแท็บ)
+    participant KC as Keycloak realm central<br/>(→ Central ID ผ่าน brokering)
+    participant KONG as Kong :8000
+    participant BUY as Buyer :3010
+
+    U->>SPA: กด "เข้าสู่ระบบด้วย ID"
+    SPA->>SDK: login()
+    SDK->>SDK: สร้าง PKCE (S256) + state + nonce<br/>เก็บ verifier ใน sessionStorage
+    SDK-->>U: redirect ไป /auth?code_challenge=…
+    U->>KC: หน้า login ของ Central ID → กรอกรหัส
+    KC-->>SDK: redirect /auth/callback?code&state&iss
+    SDK->>SDK: ตรวจ state + iss → ลบ code ออกจาก URL
+    SDK->>KC: POST /token (code + code_verifier · ไม่มี secret)
+    KC-->>SDK: access + refresh + id token
+    SDK->>KC: GET JWKS → verify id_token (RS256 · aud · azp · exp · nonce · at_hash)
+    SDK-->>U: ✅ dashboard — token อยู่ในหน่วยความจำเท่านั้น
+    U->>SPA: กด "GET orders"
+    SPA->>SDK: updateToken(20) + getAccessToken()
+    SPA->>KONG: GET /openapi/oidc/orders (Bearer)
+    KONG->>KONG: oidc-central: aud=buyer-api + scope
+    KONG->>BUY: forward
+    BUY-->>SPA: 200 (Guard ตรวจซ้ำอีกชั้น)
+    U->>SPA: Logout กลาง
+    SPA->>KC: /logout?id_token_hint=… (ตาม redirect จนจบ)
+    KC-->>SPA: กลับมาที่แอป — session ของ Central ID จบด้วย
+```
+
+> ทดสอบ: `scripts/claw-test.sh` (43 checks — curl เล่นบทเป็นเบราว์เซอร์ + SDK) · `tools/screenshots/claw.mjs` (17 checks ใน Edge จริง) · ADR-009
 
 ---
 
@@ -258,12 +301,14 @@ flowchart LR
 | ---- | ------ | ------ | --- | -------- |
 | Browser SSO + Brokering | `sso-test.sh` | 10 | ADR-001 | upstream realm ธีมเขียว |
 | Embedded Login + Brute Force | `fintech-test.sh` | 5 | — | realm-wide lockout |
-| SSO Ticket + Global Logout | `stt-test.sh` (ส่วน 7-8) | รวมใน 33 | ADR-004 | propagate จริง |
-| STT + Token Exchange | `stt-test.sh` (ส่วน 1-6) | รวมใน 33 | ADR-004 | KC Standard V2 |
+| SSO Ticket + Global Logout | `stt-test.sh` (ส่วน 7-8) | รวมใน 42 | ADR-004 | propagate จริง |
+| STT + Token Exchange | `stt-test.sh` (ส่วน 1-6) | รวมใน 42 | ADR-004 | KC Standard V2 |
 | Central API Keys | `openapi-test.sh` (ส่วน apikey) | รวมใน 31 | ADR-005 | dual header apikey/X-API-Key |
 | MCP Server | `mcp-test.sh` | 12 | ADR-005 | scope-gated tools |
 | Introspection gateway | `openapi-test.sh` (ส่วน introspect) | รวมใน 31 | ADR-005 | revoke-aware |
 | Mobile PKCE | `mobile-test.sh` | 12 | — | RFC 8252 + rotation |
+| Browser SPA + Login SDK | `claw-test.sh` · `claw.mjs` (Edge จริง) | 43 · 17 | ADR-009 | PKCE บังคับ · token ในหน่วยความจำ |
+| SPA client (claw-web) | `setup-claw.sh` | 13 | ADR-009 | public + PKCE S256 + webOrigins |
 
 ---
 
@@ -275,6 +320,6 @@ flowchart LR
 - **JWT limitation:** revoke/disable แล้ว access token เดิม valid ถึง exp — ปลายทางที่ตรวจด้วย introspection (route introspect) ปิดจุดนี้ได้
 - **production hardening ที่ยังไม่อยู่ใน POC:** backchannel logout, HA, WAF, mTLS, per-key quota
 
-รายละเอียดทั้งหมด (รวมสิ่งที่เจอจริงระหว่างทำ): [test-results.md](test-results.md) findings 1–55 · ADR-001..005
+รายละเอียดทั้งหมด (รวมสิ่งที่เจอจริงระหว่างทำ): [test-results.md](test-results.md) findings 1–65 · ADR-001..009
 
 > 🔎 **SPOF / คอขวด / แผน HA (Redis, Keycloak HA, Kong multi-node):** [SPoF-ANALYSIS.md](SPoF-ANALYSIS.md)

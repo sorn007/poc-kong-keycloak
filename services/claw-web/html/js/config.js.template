@@ -1,0 +1,7 @@
+// ไฟล์นี้เป็น template — container สร้าง js/config.js จริงจาก env ตอนเริ่ม (docker-entrypoint.d/25-config-js.sh)
+export const CONFIG = {
+  issuer: '$KEYCLOAK_ISSUER',
+  clientId: '$CLAW_CLIENT_ID',
+  baseUrl: '$APP_BASE_URL',
+  kongUrl: '$KONG_PROXY_URL',
+};

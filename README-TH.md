@@ -93,13 +93,13 @@ JWT Access Token แบบ **RS256** ที่ Keycloak ออกให้:
 }
 ```
 
-| Claim | Buyer | CIS | Open API (M2M) | Central ID Portal | Mobile App |
-| ----- | ----- | --- | -------------- | ----------------- | ---------- |
-| `iss` | Keycloak realm `central` | เดียวกัน | เดียวกัน | เดียวกัน | เดียวกัน |
-| `aud` | `buyer-api` | `cis-api` | `buyer-api` / `cis-api` | `central-id` | `buyer-api` |
-| `sub` | Central User ID | Central User ID | client id ของ Partner | Central User ID | Central User ID |
-| `scope` | `orders.*` | `projects.*` | scope ตามที่ผูกไว้กับ client | `openid profile email` | `orders.read` |
-| `principal_type` | `user` | `user` | `service` | `user` | `user` |
+| Claim | Buyer | CIS | Open API (M2M) | Central ID Portal | Mobile App | Claw Web (SPA) |
+| ----- | ----- | --- | -------------- | ----------------- | ---------- | -------------- |
+| `iss` | Keycloak realm `central` | เดียวกัน | เดียวกัน | เดียวกัน | เดียวกัน | เดียวกัน |
+| `aud` | `buyer-api` | `cis-api` | `buyer-api` / `cis-api` | `central-id` | `buyer-api` | `buyer-api` |
+| `sub` | Central User ID | Central User ID | client id ของ Partner | Central User ID | Central User ID | Central User ID |
+| `scope` | `orders.*` | `projects.*` | scope ตามที่ผูกไว้กับ client | `openid profile email` | `orders.read` | `orders.*` |
+| `principal_type` | `user` | `user` | `service` | `user` | `user` | `user` |
 
 > **Fintech App (Embedded Login)** เป็น confidential client (Direct Grant — **exception pattern** สำหรับแอป first-party ที่ต้องการฟอร์มเอง; brute force realm-wide ล็อกข้ามแอปที่ ID กลาง) — brute force นับรวมทุก client: ผิด 5 ครั้งที่แอปใด → buyer-user ถูกล็อก 30s ทุกแอป
 > **STT Session Transfer (ข้ามแอปทุกคู่)** — ต้นทาง (mobile/fintech) สร้าง one-time code ที่ ID Portal (`POST /stt/create` + `dest`) แล้วพา browser ไปจุดรับของปลายทาง `/auth/stt?code=` — ทุกปลายทางตรวจ `aud` ของตัวเองก่อนรับ session; เคส **aud ต่างกัน (→ CIS)** ใช้ **Token Exchange (KC Standard V2)** แลกเป็น token `aud=cis-api` โดย token ต้นทางต้องมี scope `stt-bridge` (เติม cis-web ใน aud) — code ใช้ครั้งเดียว อายุ 60 วิ ผูกปลายทาง — จำลอง Native-to-Web SSO แบบ Auth0 — ดู ADR-004 + ทดสอบ `scripts/stt-test.sh` (ผล §1 ข้อ 19)
@@ -110,6 +110,7 @@ JWT Access Token แบบ **RS256** ที่ Keycloak ออกให้:
 > **Guard อยู่ใน SDK กลาง** — service ไม่ถือสำเนา Guard ของตัวเองแล้ว: `@central/auth-nestjs` และ `central/auth-go` เป็น policy การตรวจ token/scope/gateway-trust/ticket ที่เดียว — ดู ADR-008 และ §5
 > **Headless App (CIBA)** เป็น confidential client (`oidc.ciba.grant.enabled=true`) — แอปทำหน้า login เอง ไม่ redirect ไป Keycloak เลย (ผู้ใช้ยืนยันผ่านอุปกรณ์ ID :3040) — token มี aud=buyer-api ผ่าน identity-buyer-web ใช้กับ Buyer API เดิมได้ทันที — รายละเอียด: research-headless-auth.md
 > **Mobile App** เป็น public client (ไม่มี secret) — บังคับ **PKCE S256** ที่ server, login ผ่าน system browser ตาม RFC 8252 (ไม่ใช้ WebView), refresh token rotation + reuse detection (ขโมย token เก่า → ยกเลิกทั้งตระกูล) — รายละเอียดทดสอบที่ `scripts/mobile-test.sh`
+> **Claw Web (SPA + Login SDK)** เป็นแอปแรกที่ทำงานอยู่ในเบราว์เซอร์ทั้งหมด (ไม่มี backend): public client `claw-web` **บังคับ PKCE S256** · ปิด implicit flow และ Direct Grant · token อยู่ในหน่วยความจำเท่านั้น — เข้าสู่ระบบด้วย `@central/login-js` แล้วเรียก Buyer API ผ่าน Kong — ดู ADR-009 และ `scripts/claw-test.sh`
 
 **กฎเหล็ก:** ห้าม CIS ยอมรับ token ที่ `aud` เป็น `buyer-api` เพียงเพราะ signature ถูก — ตรวจ `aud` เสมอ และห้ามตัดสิน user/service จากการมีหรือไม่มี `sub` เพียงอย่างเดียว ให้ใช้ `principal_type`
 
@@ -129,7 +130,6 @@ JWT Access Token แบบ **RS256** ที่ Keycloak ออกให้:
 
 ```
 poc-kong-keycloak/
-├── README.md                        ← ไฟล์นี้
 ├── README.md                        ← English README (ค่าเริ่มต้นสำหรับ public)
 ├── README-TH.md                     ← ไฟล์นี้ (Thai)
 ├── CLAUDE.md                        ← Rule สำหรับการพัฒนาใน repo นี้
@@ -148,10 +148,13 @@ poc-kong-keycloak/
 ├── packages/                        ← library กลางที่ service ใช้ร่วมกัน (ADR-008):
 │   ├── auth-nestjs/                 ← @central/auth-nestjs — Central Auth SDK สำหรับ NestJS
 │   │                                  (guards, verifiers, gateway-trust, ticket liveness, API key)
-│   └── auth-go/                     ← central/auth-go — Central Auth SDK สำหรับ Go (+ fibermw สำหรับ Fiber)
+│   ├── auth-go/                     ← central/auth-go — Central Auth SDK สำหรับ Go (+ fibermw สำหรับ Fiber)
+│   └── login-js/                    ← @central/login-js — Central Login SDK สำหรับ SPA ในเบราว์เซอร์
+│                                      (Authorization Code + PKCE S256, token ในหน่วยความจำ, refresh, logout)
 ├── services/
 │   ├── buyer-api/                   ← Mock Buyer (NestJS): ใช้ @central/auth-nestjs + OIDC/PKCE + MCP server (/mcp)
-│   └── cis-api/                     ← Mock CIS (Go Fiber): ใช้ central/auth-go (Central + Legacy + Dual)
+│   ├── cis-api/                     ← Mock CIS (Go Fiber): ใช้ central/auth-go (Central + Legacy + Dual)
+│   └── claw-web/                    ← Claw Web (:3060) — static SPA + nginx, เข้าสู่ระบบด้วย @central/login-js
 ├── scripts/
 │   ├── _lib.sh                      ← Helper ร่วมของ scripts (token, check, summary)
 │   ├── setup.sh                     ← (ครั้งแรก) import realm → ดึง public key → สร้าง kong.yml → ขึ้น stack
@@ -161,14 +164,16 @@ poc-kong-keycloak/
 │   ├── sso-test.sh                  ← Phase 5: SSO flow + logout แบบ script
 │   ├── openapi-test.sh              ← Phase 6-7 + Kong extensions: jwt/key-auth/rate-limit/cors/size + custom oidc plugins + portal routes
 │   ├── revocation-test.sh           ← Phase 8: introspect/revoke/disable
-│   └── dual-validation-test.sh      ← Phase 9: legacy + central + token นอก allowlist
+│   ├── dual-validation-test.sh      ← Phase 9: legacy + central + token นอก allowlist
+│   └── setup-claw.sh / claw-test.sh ← SPA (claw-web + Login SDK): ตั้งค่า client + E2E
 └── docs/
     ├── test-results.md              ← บันทึกผลทดสอบแต่ละ Scenario
     ├── migration-plan.md            ← แผน Migration Option A/B สู่ Production
     ├── research-headless-auth.md    ← Research ความเป็นไปได้ Headless Auth (CIBA vs Custom Extension)
-    ├── (services: central-id :3000 · headless-demo :3030 · id-device :3040 · fintech-web :3050 — Embedded Login exception demo)
-    ├── ADR-001..008                 ← การตัดสินใจสถาปัตยกรรม (IdP / Token Contract / Kong / STT+Token Exchange /
-    │                                  Kong gateway evolution / Kong shared lib / ticketcore / Unified Auth SDK)
+    ├── (services เพิ่มเติม: central-id :3000 · headless-demo :3030 · id-device :3040 · fintech-web :3050)
+    ├── ADR-001..009                 ← การตัดสินใจสถาปัตยกรรม (IdP / Token Contract / Kong / STT+Token Exchange /
+    │                                  Kong gateway evolution / Kong shared lib / ticketcore / Unified Auth SDK /
+    │                                  Browser Login SDK)
 ```
 
 ### Central Auth SDK กลาง (`packages/`)
@@ -187,6 +192,21 @@ Service ระบุเฉพาะ "ตัวตนของตัวเอง"
 
 **แก้ SDK:** แก้ที่ `packages/…` → รัน unit test ของมัน (`go test ./...` / `npm test`) → rebuild service ที่เกี่ยว (`docker compose build buyer-api cis-api …`) — ใน POC dependency ชี้ path ใน repo จึงได้ SDK รุ่นล่าสุดทันทีเมื่อ rebuild · ถ้าต้องการให้แต่ละ service pin เวอร์ชันแยกกัน ให้ publish ขึ้น private registry / Go module tag · ถ้ารัน service NestJS บนเครื่องแทน Docker ต้องลบสำเนา SDK ที่ติดตั้งไว้ก่อน (`rm -rf node_modules/@central/auth-nestjs && npm install`) — npm ไม่ refresh dependency แบบ `file:` เมื่อมีแค่ source ของ SDK เปลี่ยน
 
+### Login SDK สำหรับแอปในเบราว์เซอร์ (`@central/login-js`)
+
+`claw-web` เป็นแอปแรกที่ทำงานอยู่ในเบราว์เซอร์ทั้งหมด (static SPA ไม่มี backend) จึงใช้ Guard ฝั่ง server ไม่ได้ — แอปเข้าสู่ระบบด้วย **`@central/login-js`** (ADR-009): OIDC client ที่ไม่มี dependency สร้างบน WebCrypto ล้วน
+
+| สิ่งที่ SDK บังคับ | วิธี |
+| --- | --- |
+| Authorization Code + PKCE แบบ S256 เท่านั้น | verifier สุ่ม 43 ตัวอักษร — Keycloak ปฏิเสธ `plain` และคำขอที่ไม่มี challenge |
+| ผูก response กับคำขอ | `state` + `nonce` สุ่ม — callback ต้องตรงทั้งคู่ และมี `iss` ตรงกับที่กำหนด |
+| ตรวจ id_token ก่อนเชื่อ claims ใด ๆ | RS256 เท่านั้น · `kid` จาก JWKS ของ issuer · `iss` / `aud` / `azp` / `exp` / `nonce` / `at_hash` |
+| Token ไม่ออกจากหน่วยความจำ | ไม่เขียนลง `localStorage` / `sessionStorage` — reload หน้าจะกู้ session ด้วย silent login (`prompt=none`) |
+| Refresh แบบไม่ชนกัน | refresh ทีละครั้งต่อแท็บ · refresh ถูกปฏิเสธ → เคลียร์ session และแจ้ง `signedOut` |
+| กัน redirect loop | หยุด redirect อัตโนมัติหลัง OP ตอบ error, หลัง logout, หรือครบ 3 ครั้งใน 30 วินาที |
+
+การใช้งาน: `createLogin({ issuer, clientId, redirectUri })` → `await login.init()` (จัดการ callback / กู้ SSO session เงียบ ๆ) → `login.login()` เมื่อยังไม่ login → `await login.updateToken(20)` ก่อนเรียก API ทุกครั้ง → ใส่ `Authorization: Bearer ${login.getAccessToken()}` (ตัวอย่างโค้ดเต็มอยู่ใน README EN §5)
+
 ## 6. ขั้นตอนการทำ POC (Phases)
 
 | Phase | งาน | ผลลัพธ์ | สถานะ |
@@ -203,9 +223,9 @@ Service ระบุเฉพาะ "ตัวตนของตัวเอง"
 | 10 | สรุปผล + แผน Migration Option A/B | เอกสารเสนอทีม | ✅ |
 | 11 | Extension: Headless CIBA (Phase 0 pilot จาก research) + Fintech Embedded Login + Brute Force + STT ข้ามแอป + SSO Ticket (เปิดแท็บใหม่ไม่ login) | `ciba-test.sh` 16/16 · `fintech-test.sh` 5/5 · `stt-test.sh` 42/42 | ✅ |
 | 12 | Central API Keys (ออก key ผูก scope จาก ID Portal) + custom Kong plugins (gateway OIDC/introspection) + MCP Server + portal routing + i18n EN/ไทย | `openapi-test.sh` 31/31 · `mcp-test.sh` 12/12 | ✅ |
-| 12 | Central API Keys (ออก key ผูก scope จาก ID Portal) + custom Kong plugins (gateway OIDC/introspection) + MCP Server + portal routing + i18n EN/ไทย | `openapi-test.sh` 31/31 · `mcp-test.sh` 12/12 | ✅ |
+| 13 | แอปในเบราว์เซอร์ (SPA `claw-web`) + Login SDK (`@central/login-js`): Authorization Code + PKCE S256 ฝั่งเบราว์เซอร์ · token ในหน่วยความจำ · เรียก Buyer API ผ่าน Kong | `setup-claw.sh` 13/13 · `claw-test.sh` 43/43 · browser journey จริง 17/17 | ✅ |
 
-> **สถานะ (2026-11-25):** ทดสอบครบทุก Phase แล้ว — **15 scripts, 170/170 checks PASS จาก 11 test suites** (sweep ครบบน store backend **Redis** ตัวใหม่: smoke/SSO/openapi/MCP/revocation/dual-validation/mobile/CIBA/Fintech/STT v2 — รายละเอียด + สิ่งที่พบที่ [docs/test-results.md](docs/test-results.md)) · **ผล audit ซอร์สโค้ด** ตอบคำถาม reviewer 4 ข้อ (ticket broker/restart, session guard, STT atomic, token exchange): [docs/SECURITY-AUDIT.md](docs/SECURITY-AUDIT.md) — gap "restart = kick session ทุกคน" ปิดแล้วด้วย `STORE_BACKEND=redis` (พิสูจน์ด้วย restart test จริง) เหลือเฉพาะ browser demo ด้วยมือ (checklist ใน test-results §3) และเคส Tenant reject เมื่อ tenant ไม่ใช่ hardcoded (⚠️ ดู §1 ข้อ 7)
+> **สถานะ (2026-11-26):** ทดสอบครบทุก Phase แล้ว — **16 scripts, 213/213 checks PASS จาก 12 test suites** (sweep ครบบน store backend **Redis**: smoke/SSO/openapi/MCP/revocation/dual-validation/mobile/CIBA/Fintech/STT v2/SPA — รายละเอียด + สิ่งที่พบที่ [docs/test-results.md](docs/test-results.md)) · **ผล audit ซอร์สโค้ด** ตอบคำถาม reviewer 4 ข้อ (ticket broker/restart, session guard, STT atomic, token exchange): [docs/SECURITY-AUDIT.md](docs/SECURITY-AUDIT.md) — gap "restart = kick session ทุกคน" ปิดแล้วด้วย `STORE_BACKEND=redis` (พิสูจน์ด้วย restart test จริง) เหลือเฉพาะ browser demo ด้วยมือ (checklist ใน test-results §3) และเคส Tenant reject เมื่อ tenant ไม่ใช่ hardcoded (⚠️ ดู §1 ข้อ 7)
 
 ## 7. วิธีรัน (เมื่อ Scaffold แล้ว)
 
@@ -236,12 +256,16 @@ bash scripts/fintech-test.sh            # Fintech: login form เอง (Direct 
 bash scripts/setup-stt.sh               # STT v2: scope stt-bridge + cis-web confidential + เปิด Token Exchange (idempotent)
 bash scripts/stt-test.sh                # STT v2: โอน session ข้ามแอป Buyer/CIS/Fintech + dest binding + Token Exchange
 bash scripts/mcp-test.sh                # MCP server (Streamable HTTP): apikey auth + scope-gated tools
+bash scripts/setup-claw.sh              # SPA: public client claw-web บังคับ PKCE S256 (idempotent)
+docker compose up -d claw-web           # static SPA ที่ :3060 (build Login SDK ภายใน image)
+bash scripts/claw-test.sh               # SPA E2E: PKCE บังคับ, login ผ่าน Central ID, Kong 200/201, refresh, logout
+# ตรวจในเบราว์เซอร์จริง (Edge ผ่าน Playwright) — พิสูจน์ว่า SDK ทำงานใต้ CSP ของแอป:
+# cd tools/screenshots && set -a && source ../../.env && set +a && node claw.mjs   → 17 checks + screenshots
 
 # Central API Keys — ออก key ผูก scope จาก ID Portal แล้วเรียก Open API
-UT=$(curl -s "http://localhost:8080/realms/central/protocol/openid-connect/token" -d grant_type=password -d client_id=buyer-web -d username=buyer-user -d password="$TEST_USER_PASSWORD" -d scope=openid | sed -n 's/.*"access_token":"([^"]*)".*//p')
+UT=$(curl -s "http://localhost:8080/realms/central/protocol/openid-connect/token" -d grant_type=password -d client_id=buyer-web -d username=buyer-user -d password="$TEST_USER_PASSWORD" -d scope=openid | sed -n 's/.*"access_token":"([^"]*)".*/\1/p')
 curl -s -X POST http://localhost:3000/apikeys/create -H "Authorization: Bearer $UT" -d name=demo -d scopes=orders.read
 curl -H "apikey: <key>" http://localhost:8000/openapi/apikey/orders   # 200
-bash scripts/mcp-test.sh                # MCP server (Streamable HTTP): apikey auth + scope-gated tools
 
 # Identity Brokering — จำลอง "Central ID จริง" เป็น IdP ต้นทาง (Option B ใน migration-plan)
 # ผู้ใช้ login ที่ upstream realm (ธีมเขียว) → realm central (ซ่อนเบื้องหลัง) ออก token ให้แอป
@@ -258,6 +282,7 @@ docker compose ps
 #    Central ID Portal :3000 (บัญชีกลาง: โปรไฟล์/แอปที่เชื่อมต่อ/session/logout กลาง)
 #    Buyer Portal      :3010 (NestJS — Orders)
 #    CIS Portal        :3020 (Go Fiber — Projects)
+#    Claw Web          :3060 (SPA ในเบราว์เซอร์ — เข้าสู่ระบบด้วย @central/login-js แล้วเรียก Buyer API ผ่าน Kong)
 #    เดิน flow: เปิด :3000 → ล็อกอิน (หน้า login ธีม Central ID) → เปิดแอป Buyer/CIS จากหน้า "แอปที่เชื่อมต่อ"
 #    → SSO อัตโนมัติไม่ถามรหัสผ่าน → กด "Logout กลาง" ที่แอปใดก็ได้ → ทุกแอปต้อง login ใหม่
 #    แถบขั้นตอน flow แสดงบนทุกหน้า + จัดการอุปกรณ์/session ทั้งหมดที่ Account Console (:8080/realms/central/account)
@@ -287,6 +312,8 @@ docker compose ps
 | MCP tools/call `create_order` ด้วย key read-only | Tool error ระบุ `orders.write` |
 | API key ถูก revoke ที่ ID Portal | Kong gateway ปฏิเสธหลัง cache หมด |
 | เปิด Portal ผ่าน Kong (`/portal/…`) | Served ผ่าน gateway · SSO cookie (host-wide) ยังใช้ได้ |
+| SPA: authorize ไม่มี PKCE (หรือใช้ `plain`) | ถูกปฏิเสธที่ authorization endpoint — ไม่ออก code ไม่เข้าหน้า login |
+| SPA เข้าสู่ระบบด้วย `@central/login-js` → เรียก Buyer API ผ่าน Kong | 200 / 201 ด้วย Bearer token ที่แลกในเบราว์เซอร์ (ไม่มี client secret) |
 
 ผลทดสอบทุกข้อบันทึกที่ [docs/test-results.md](docs/test-results.md)
 
@@ -339,13 +366,14 @@ POC นี้เริ่มจาก user ใน Keycloak ก่อน แล�
 
 ## 12. Screenshots
 
-ภาพหน้าจอทั้ง 30 ภาพ (โหมด English) อยู่ที่ [docs/screenshots/](docs/screenshots/) — regenerate ได้ด้วย `tools/screenshots/*.mjs`:
+ภาพหน้าจอทั้ง 34 ภาพ (โหมด English) อยู่ที่ [docs/screenshots/](docs/screenshots/) — regenerate ได้ด้วย `tools/screenshots/*.mjs`:
 
 | | |
 | --- | --- |
 | ![ID Portal landing](docs/screenshots/01-central-id-portal-guest.png) | ![Buyer via SSO](docs/screenshots/07-buyer-portal-dashboard-sso.png) |
 | ![Fintech Embedded Login](docs/screenshots/21-fintech-login-form.png) | ![Cross-app SSO ticket](docs/screenshots/29-cis-newtab-sso.png) |
 | ![Central API Keys](docs/screenshots/34-apikeys-en.png) | ![ID device approval (CIBA)](docs/screenshots/18-id-device-approval.png) |
+| ![Claw Web — dashboard ของ SPA](docs/screenshots/32-claw-dashboard-en.png) | ![Claw Web — เรียก Buyer API ผ่าน Kong](docs/screenshots/33-claw-api-en.png) |
 
 ## 13. Troubleshooting (สิ่งที่เจอจริงระหว่างทำ)
 
@@ -358,6 +386,10 @@ POC นี้เริ่มจาก user ใน Keycloak ก่อน แล�
 | `buyer-user` 401 ระหว่างรัน test ซ้ำ ๆ | brute-force protection ล็อกบัญชี (ตามดีไซน์) | ปลดผ่าน Admin API: `DELETE /admin/realms/central/attack-detection/brute-force/users/buyer-user` |
 | MCP client ได้ 401 | ไม่มี/ผิด API key header | ส่ง `apikey: central_…` (ออกที่ ID Portal → API Keys) |
 | MCP transport ปฏิเสธ request | client ต้องรับทั้งสอง content type | ส่ง `Accept: application/json, text/event-stream` |
+| SPA (claw-web) login ไม่จบ แล้ว console ขึ้น `Failed to fetch` ที่ token endpoint | CORS ของเบราว์เซอร์: Keycloak ใส่ CORS header เฉพาะ origin ที่อยู่ใน `webOrigins` ของ client | เพิ่ม origin ของแอปใน **Web Origins** ของ client (`setup-claw.sh` ตั้งให้ `claw-web` แล้ว) |
+| SPA ถูกพาไป Keycloak แล้ววนกลับมาไม่รู้จบ | loop guard: หยุด sign-in อัตโนมัติหลัง OP ตอบ error, หลัง logout, หรือครบ 3 ครั้งใน 30 วิ | รอ 60 วิ แล้วกด **เข้าสู่ระบบ** เอง · ดู log ของ Keycloak ว่า OP ตอบ error อะไร |
+| SPA ขึ้น "unknown signing key" หลัง login | id_token ถูกเซ็นด้วย `kid` ที่ยังไม่อยู่ใน JWKS | มักเกิดชั่วคราวตอน key rotation — SDK ดึง JWKS ใหม่ให้เอง 1 ครั้ง · ตรวจว่า Keycloak เรียกตัวเองที่ issuer ที่ตั้งไว้ได้ |
+| E2E test ล้มหลัง negative test ของ PKCE (verifier ผิด / ใช้ code ซ้ำ) | Keycloak เพิกถอน token ของ session นั้นเมื่อแลก code ไม่สำเร็จ — ตามดีไซน์ | วาง negative test ไว้ **ท้ายสุด** ของ session (แบบ `claw-test.sh`) หรือเปิด session ใหม่ |
 
 ## 14. License
 

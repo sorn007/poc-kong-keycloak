@@ -243,6 +243,30 @@ services:
       - keycloak
     networks: [central-net]
 
+  # Claw Web — แอปในเบราว์เซอร์ (SPA) เข้าสู่ระบบด้วย @central/login-js: Authorization Code + PKCE S256
+  # token อยู่ในหน่วยความจำของเบราว์เซอร์ · เรียก Buyer API ผ่าน Kong (ADR-009)
+  claw-web:
+    build:
+      context: ./services/claw-web
+      additional_contexts:
+        # Login SDK (packages/login-js) — build ร่วมกับ image
+        login-js: ./packages/login-js
+    container_name: poc-claw-web
+    environment:
+      KEYCLOAK_ISSUER: http://localhost:8080/realms/central
+      KEYCLOAK_ORIGIN: http://localhost:8080
+      KONG_PROXY_URL: http://localhost:8000
+      KONG_ORIGIN: http://localhost:8000
+      APP_BASE_URL: http://localhost:3060
+      CLAW_CLIENT_ID: claw-web
+      # ให้ nginx envsubst แทนที่เฉพาะสองตัวนี้ (ตัวแปรของ nginx อย่าง $uri ต้องอยู่ครบ)
+      NGINX_ENVSUBST_FILTER: "^(KEYCLOAK_ORIGIN|KONG_ORIGIN)$"
+    ports:
+      - "3060:8080"
+    depends_on:
+      - keycloak
+    networks: [central-net]
+
 volumes:
   pgdata:
   redis_data:

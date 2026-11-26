@@ -714,6 +714,39 @@
       ]
     },
     {
+      "clientId": "claw-web",
+      "name": "Claw Web (SPA + @central/login-js)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "rootUrl": "http://localhost:3060",
+      "redirectUris": [
+        "http://localhost:3060/auth/callback"
+      ],
+      "webOrigins": [
+        "http://localhost:3060"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3060"
+      },
+      "defaultClientScopes": [
+        "acr",
+        "basic",
+        "email",
+        "identity-buyer-web",
+        "orders.read",
+        "orders.write",
+        "profile",
+        "role_list",
+        "roles",
+        "web-origins"
+      ]
+    },
+    {
       "clientId": "cis-web",
       "name": "CIS Web (POC)",
       "enabled": true,

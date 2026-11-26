@@ -52,6 +52,7 @@ Repo นี้คือ Proof of Concept สำหรับ Central: ใช้ *
 
 - **Authentication อยู่ที่ SDK กลางใน `packages/` (ADR-008)** — `@central/auth-nestjs` (buyer-api) และ `central/auth-go` (CIS, ID Portal, ID device, Fintech) เป็น policy เดียวของการตรวจ token, scope guard, gateway-trust และ ticket liveness · **ห้ามเขียน guard/verifier ซ้ำใน service** — ให้ระบุเฉพาะตัวตนของตัวเอง (issuer/audience/JWKS + legacy secret) ที่ไฟล์ต่อ SDK ของ service เช่น `services/buyer-api/src/central-auth.ts`
 - **SDK ทำเฉพาะ Authentication** — tenant/business permission ยังอยู่ที่ service ตามข้อ "ห้ามย้าย business authorization" ด้านบน · เปลี่ยน Token Contract ให้แก้ที่ `packages/` ก่อน (พร้อม unit test ของ SDK) แล้ว rebuild service
+- **Login ฝั่งเบราว์เซอร์ (SPA) อยู่ที่ `@central/login-js` (`packages/login-js` — ADR-009)** — แอปที่รันในเบราว์เซอร์เข้าสู่ระบบด้วย SDK นี้ (Authorization Code + PKCE S256, token ในหน่วยความจำเท่านั้น, refresh, logout) · **ห้ามเขียน PKCE/state/nonce/การแลก code ในแอปเอง** · client ของ SPA ต้องเป็น public + `pkce.code.challenge.method=S256` + ปิด implicit flow · ตัวอย่าง: `services/claw-web`
 
 ## Naming & Configuration Contract
 
@@ -63,6 +64,7 @@ Repo นี้คือ Proof of Concept สำหรับ Central: ใช้ *
 | Principal type | `user`, `service` |
 | Signing | RS256, JWKS ที่ `/realms/central/protocol/openid-connect/certs` |
 | Legacy secrets | ตั้งชื่อ env แบบ `LEGACY_BUYER_JWT_SECRET`, `LEGACY_CIS_JWT_SECRET` เพื่อแยกจาก central |
+| SPA client | `claw-web` — public client, Authorization Code + PKCE S256 เท่านั้น, token อยู่ในหน่วยความจำของ browser (ADR-009) |
 
 เปลี่ยนค่าใดได้ ต้องแก้พร้อมกันทั้ง: `keycloak/central-realm.json`, `docker-compose.yml`, Guard/Middleware ของทั้งสองฝั่ง และตารางใน README §4
 

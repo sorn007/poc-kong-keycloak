@@ -1,0 +1,95 @@
+<!doctype html>
+<!-- Claw Web — SPA ที่ login ด้วย @central/login-js (ADR-009)
+     ไม่มี inline script / inline style / onclick — ให้ CSP แบบ script-src 'self' + style-src 'self' ทำงานได้ -->
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claw Web — Central Identity POC</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><span class="logo">C</span><span data-i18n="brand">Claw Web</span></a>
+    <nav>
+      <a href="http://localhost:3000" data-i18n="nav.id">Central ID ↗</a>
+      <a href="http://localhost:3010" data-i18n="nav.buyer">Buyer ↗</a>
+      <a href="http://localhost:3020" data-i18n="nav.cis">CIS ↗</a>
+    </nav>
+    <div class="spacer"></div>
+    <div id="userchip" class="userchip hidden"><span id="userchip-name" class="name"></span></div>
+    <div class="langsw"><span id="lang-cur" class="langcur">TH</span><a id="lang-link" href="?lang=en" title="switch language">EN</a></div>
+  </header>
+
+  <main class="wrap">
+    <!-- ── ยังไม่ login ── -->
+    <section id="view-landing" class="hidden">
+      <div class="hero">
+        <h1 data-i18n="hero.title">Claw Web</h1>
+        <p data-i18n="hero.sub">แอปในเบราว์เซอร์ (SPA) ที่เข้าสู่ระบบด้วย Central ID ผ่าน Login SDK</p>
+        <p><button id="btn-login" class="btn btn-primary" data-i18n="hero.btn">เข้าสู่ระบบด้วย ID</button></p>
+        <p class="hero-note" data-i18n="hero.note">PKCE (S256) · token อยู่ในหน่วยความจำของแท็บนี้เท่านั้น ไม่เขียนลง storage</p>
+      </div>
+      <div id="notice" class="notice warn hidden"></div>
+      <div class="card">
+        <h2 data-i18n="how.title">ทำงานอย่างไร</h2>
+        <ol>
+          <li data-i18n="how.1">SDK สร้าง PKCE (verifier + challenge S256), state และ nonce แล้วพาไปหน้า login ของ Central ID</li>
+          <li data-i18n="how.2">Keycloak ส่ง authorization code กลับมาที่ /auth/callback — SDK ตรวจ state และ iss ก่อนแลก code ด้วย verifier</li>
+          <li data-i18n="how.3">SDK ตรวจลายเซ็น id_token (RS256 จาก JWKS), aud, azp, exp และ nonce ก่อนเชื่อ claims</li>
+          <li data-i18n="how.4">เรียก Buyer API ผ่าน Kong ด้วย Bearer token — Kong และ Buyer ตรวจ aud=buyer-api + scope อีกชั้น</li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ── login แล้ว ── -->
+    <section id="view-dashboard" class="hidden">
+      <div class="grid2">
+        <div class="card">
+          <h2 data-i18n="profile.title">โปรไฟล์</h2>
+          <table class="kv">
+            <tbody>
+              <tr><th>sub</th><td><code id="p-sub"></code></td></tr>
+              <tr><th data-i18n="profile.username">ชื่อผู้ใช้</th><td id="p-username"></td></tr>
+              <tr><th data-i18n="profile.name">ชื่อ</th><td id="p-name"></td></tr>
+              <tr><th>email</th><td id="p-email"></td></tr>
+            </tbody>
+          </table>
+          <p class="sub" data-i18n="profile.note">จาก id_token ที่ SDK ตรวจลายเซ็นแล้ว (RS256 · iss · aud · azp · nonce)</p>
+        </div>
+        <div class="card">
+          <h2 data-i18n="token.title">Access token</h2>
+          <p class="sub"><span data-i18n="token.expires">หมดอายุใน</span> <b id="t-expires">–</b> <span data-i18n="token.seconds">วินาที</span></p>
+          <div class="row"><span class="label">aud</span><span id="t-aud"></span></div>
+          <div class="row"><span class="label">scope</span><span id="t-scope"></span></div>
+          <div class="row"><span class="label">principal_type</span><code id="t-ptype"></code></div>
+          <div class="row"><span class="label">tenant_id</span><code id="t-tenant"></code></div>
+          <p class="sub" data-i18n="token.note">decode จาก token เพื่อแสดงผลเท่านั้น — ผู้ตรวจจริงคือ API ปลายทาง</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="api.title">เรียก Buyer API ผ่าน Kong</h2>
+        <p class="sub"><code data-i18n="api.url">GET/POST /openapi/oidc/orders</code> · Bearer · Kong ตรวจ aud=buyer-api + scope</p>
+        <div class="actions">
+          <button id="btn-api-get" class="btn btn-primary btn-sm">GET orders</button>
+          <button id="btn-api-post" class="btn btn-ghost btn-sm">POST order</button>
+          <button id="btn-refresh" class="btn btn-ghost btn-sm" data-i18n="api.refresh">ต่ออายุ token</button>
+        </div>
+        <pre id="api-out" class="code"></pre>
+      </div>
+
+      <div class="card actions">
+        <button id="btn-logout" class="btn btn-danger btn-sm" data-i18n="logout.btn">Logout กลาง</button>
+        <span class="sub" data-i18n="logout.note">จบ SSO session ที่ Keycloak และ Central ID → ทุกแอปต้องเข้าสู่ระบบใหม่</span>
+      </div>
+    </section>
+
+    <p class="foot">POC — claw-web (static SPA + nginx) · @central/login-js · Keycloak Authorization Code + PKCE S256</p>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

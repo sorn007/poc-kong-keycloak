@@ -95,13 +95,13 @@ RS256 access tokens issued by Keycloak:
 }
 ```
 
-| Claim | Buyer | CIS | Open API (M2M) | Central ID Portal | Mobile App |
-| ----- | ----- | --- | -------------- | ----------------- | ---------- |
-| `iss` | Keycloak realm `central` | same | same | same | same |
-| `aud` | `buyer-api` | `cis-api` | `buyer-api` / `cis-api` | `central-id` | `buyer-api` |
-| `sub` | Central User ID | Central User ID | partner client id | Central User ID | Central User ID |
-| `scope` | `orders.*` | `projects.*` | scope bound to the client | `openid profile email` | `orders.read` |
-| `principal_type` | `user` | `user` | `service` | `user` | `user` |
+| Claim | Buyer | CIS | Open API (M2M) | Central ID Portal | Mobile App | Claw Web (SPA) |
+| ----- | ----- | --- | -------------- | ----------------- | ---------- | -------------- |
+| `iss` | Keycloak realm `central` | same | same | same | same | same |
+| `aud` | `buyer-api` | `cis-api` | `buyer-api` / `cis-api` | `central-id` | `buyer-api` | `buyer-api` |
+| `sub` | Central User ID | Central User ID | partner client id | Central User ID | Central User ID | Central User ID |
+| `scope` | `orders.*` | `projects.*` | scope bound to the client | `openid profile email` | `orders.read` | `orders.*` |
+| `principal_type` | `user` | `user` | `service` | `user` | `user` | `user` |
 
 > **Fintech App (Embedded Login)** — confidential client (Direct Grant — an intentional **exception pattern** for first-party apps that need their own login form; realm-wide brute force protection locks across apps at the ID layer): 5 wrong attempts on any app → 30s lockout for buyer-user everywhere.
 > **STT Session Transfer (cross-app)** — the source app (mobile/fintech) creates a one-time code at the ID Portal (`POST /stt/create` + `dest`) and sends the browser to the destination's `/auth/stt?code=`. Every destination validates its own `aud` first; when audiences differ (→ CIS) it uses **Token Exchange (KC Standard V2)** to mint an `aud=cis-api` token — the source token must carry the `stt-bridge` scope (adds cis-web to aud). Codes are one-time, 60s, bound to a destination — an Auth0-style Native-to-Web SSO simulation. See ADR-004 and `scripts/stt-test.sh` (results §1 item 19).
@@ -112,6 +112,7 @@ RS256 access tokens issued by Keycloak:
 > **Guards live in a shared SDK** — services no longer keep private copies of the token guard: `@central/auth-nestjs` and `central/auth-go` hold one authentication policy (token verification, scope guard, gateway-trust, ticket liveness) — see ADR-008 and §5
 > **Headless App (CIBA)** — confidential client (`oidc.ciba.grant.enabled=true`) — the app renders its own login UI, never redirecting to Keycloak (the user confirms on an ID device at :3040). Tokens carry `aud=buyer-api` via identity-buyer-web and work with the existing Buyer API immediately. Details: research-headless-auth.md
 > **Mobile App** — public client (no secret): **PKCE S256** enforced server-side, login via system browser per RFC 8252 (no WebView), refresh token rotation + reuse detection (a stolen old token revokes the whole family) — tested in `scripts/mobile-test.sh`
+> **Claw Web (SPA + Login SDK)** — the first app that runs entirely in the browser (no backend): public client `claw-web`, **PKCE S256 enforced**, implicit flow and Direct Grant off, tokens live only in memory. It signs in with `@central/login-js` and calls the Buyer API through Kong — see ADR-009 and `scripts/claw-test.sh`
 
 **Iron rule:** CIS must never accept a token with `aud=buyer-api` just because the signature is valid — always validate `aud`, and never decide user vs service from the presence of `sub`; use `principal_type`.
 
@@ -154,7 +155,9 @@ poc-kong-keycloak/
 ├── packages/                        ← shared libraries used by services (ADR-008):
 │   ├── auth-nestjs/                 ← @central/auth-nestjs — Central Auth SDK for NestJS
 │   │                                  (guards, verifiers, gateway-trust, ticket liveness, API key)
-│   └── auth-go/                     ← central/auth-go — Central Auth SDK for Go (+ fibermw for Fiber)
+│   ├── auth-go/                     ← central/auth-go — Central Auth SDK for Go (+ fibermw for Fiber)
+│   └── login-js/                    ← @central/login-js — Central Login SDK for browser SPAs
+│                                      (Authorization Code + PKCE S256, in-memory tokens, refresh, logout)
 ├── services/
 │   ├── buyer-api/                   ← Mock Buyer (NestJS): uses @central/auth-nestjs + OIDC/PKCE
 │   │                                   + gateway controller (API keys) + MCP server (/mcp)
@@ -164,7 +167,8 @@ poc-kong-keycloak/
 │   │                                   (tickets/codes run on internal/ticketcore — ADR-007)
 │   ├── fintech-web/                 ← Fintech demo (:3050) — Embedded Login + SSO ticket source
 │   ├── headless-demo/               ← Headless demo (:3030) — CIBA client device
-│   └── id-device/                   ← ID device (:3040) — CIBA auth device (approver UI)
+│   ├── id-device/                   ← ID device (:3040) — CIBA auth device (approver UI)
+│   └── claw-web/                    ← Claw Web (:3060) — static SPA + nginx, signs in with @central/login-js
 ├── scripts/
 │   ├── _lib.sh                      ← shared helpers (tokens, check, summary)
 │   ├── setup.sh                     ← (first run) import realm → fetch keys → build kong.yml
@@ -181,16 +185,17 @@ poc-kong-keycloak/
 │   ├── setup-ciba.sh / ciba-test.sh ← Headless CIBA pilot (config + E2E)
 │   ├── setup-fintech.sh / fintech-test.sh ← Embedded Login + brute force
 │   ├── setup-stt.sh / stt-test.sh   ← STT cross-app + SSO ticket + global logout
-│   └── mcp-test.sh                  ← MCP server: apikey auth + scope-gated tools
+│   ├── mcp-test.sh                  ← MCP server: apikey auth + scope-gated tools
+│   └── setup-claw.sh / claw-test.sh ← SPA (claw-web + Login SDK): client config + E2E
 ├── tools/screenshots/               ← Playwright scripts that regenerate docs/screenshots
 └── docs/
     ├── test-results.md              ← per-scenario test log (Thai)
     ├── migration-plan.md            ← Migration plan Option A/B → production
     ├── research-headless-auth.md    ← Headless auth feasibility research (CIBA vs custom extension)
-    ├── screenshots/                 ← 30 UI screenshots (English UI — regenerated by tools/screenshots/*.mjs)
-    ├── ADR-001..008                 ← architecture decisions (IdP / Token Contract / Kong /
+    ├── screenshots/                 ← 34 UI screenshots (English UI — regenerated by tools/screenshots/*.mjs)
+    ├── ADR-001..009                 ← architecture decisions (IdP / Token Contract / Kong /
                                       STT+Token Exchange / Kong gateway evolution / Kong shared
-                                      lib / ticketcore / Unified Auth SDK)
+                                      lib / ticketcore / Unified Auth SDK / Browser Login SDK)
 ```
 
 ### Shared auth SDK (`packages/`)
@@ -209,6 +214,29 @@ Each service states only its own identity (issuer / audience / JWKS URL + legacy
 
 **Changing the SDK:** edit `packages/…` → run its unit tests (`go test ./...` / `npm test`) → rebuild the services (`docker compose build buyer-api cis-api …`). In-repo path dependencies mean every rebuilt service gets the latest SDK; for independent per-service versioning publish to a private npm registry / Go module tag and pin versions. Running a NestJS service locally instead of in Docker: delete its installed SDK copy first (`rm -rf node_modules/@central/auth-nestjs && npm install`) — npm does not refresh a `file:` dependency when only the SDK source changed.
 
+### Login SDK for browser apps (`@central/login-js`)
+
+`claw-web` is the first app that runs entirely in the browser (a static SPA with no backend), so it cannot use a server-side guard. It signs in with **`@central/login-js`** (ADR-009) — a dependency-free OIDC client built on WebCrypto:
+
+| What the SDK enforces | How |
+| --- | --- |
+| Authorization Code + PKCE, S256 only | 43-char random verifier; Keycloak rejects `plain` and requests without a challenge |
+| Response binding | random `state` + `nonce`; the callback must echo both and carry the expected `iss` |
+| id_token verified before any claim is used | RS256 only, `kid` from the configured issuer's JWKS, `iss` / `aud` / `azp` / `exp` / `nonce` / `at_hash` |
+| Tokens never leave memory | nothing is written to `localStorage` / `sessionStorage`; a reload restores the session with a silent `prompt=none` sign-in |
+| Refresh without races | one in-flight refresh per tab; a rejected refresh clears the session and emits `signedOut` |
+| No redirect loops | automatic redirects stop after an OP error, after logout, or after 3 redirects in 30 s |
+
+```js
+import { createLogin } from '@central/login-js';
+
+const login = createLogin({ issuer, clientId: 'claw-web', redirectUri: `${location.origin}/auth/callback` });
+const result = await login.init();          // finishes the callback / restores the SSO session silently
+if (!login.isAuthenticated()) await login.login();
+await login.updateToken(20);                // before every API call
+fetch(`${kongUrl}/openapi/oidc/orders`, { headers: { Authorization: `Bearer ${login.getAccessToken()}` } });
+```
+
 ## 6. POC phases
 
 | Phase | Work | Outcome | Status |
@@ -225,8 +253,9 @@ Each service states only its own identity (issuer / audience / JWKS URL + legacy
 | 10 | Summary + Migration plan Option A/B | Team-facing document | ✅ |
 | 11 | Extensions: Headless CIBA + Fintech Embedded Login + brute force + cross-app STT + SSO ticket (new-tab SSO) | `ciba-test.sh` 16/16 · `fintech-test.sh` 5/5 · `stt-test.sh` 42/42 | ✅ |
 | 12 | Central API Keys (scope-bound, minted at the ID Portal) + custom Kong plugins (gateway OIDC/introspection) + MCP Server + portal routing + EN/TH i18n | `openapi-test.sh` 31/31 · `mcp-test.sh` 12/12 | ✅ |
+| 13 | Browser SPA (`claw-web`) + Login SDK (`@central/login-js`): Authorization Code + PKCE S256 in the browser, in-memory tokens, Buyer API through Kong | `setup-claw.sh` 13/13 · `claw-test.sh` 43/43 · real-browser journey 17/17 | ✅ |
 
-> **Status (2026-11-25):** all phases tested — **15 scripts, 170/170 checks PASS across 11 test suites** (full sweep on the new **Redis store backend**: smoke/SSO/openapi/MCP/revocation/dual-validation/mobile/CIBA/Fintech/STT v2 — details in [docs/test-results.md](docs/test-results.md), Thai). **Security audit** answering the reviewer's 4 implementation questions (ticket broker storage/atomic revocation/restart, session guard coverage, STT atomic consume, token exchange authorization): [docs/SECURITY-AUDIT.md](docs/SECURITY-AUDIT.md) — restart-survival gap closed with `STORE_BACKEND=redis` (AOF persistence proven by restart test). Remaining known gaps: manual browser demo checklist (test-results §3) and the tenant-rejection case when tenant isn't hardcoded (⚠️ see §1 item 7 of that file).
+> **Status (2026-11-26):** all phases tested — **16 scripts, 213/213 checks PASS across 12 test suites** (full sweep on the **Redis store backend**: smoke/SSO/openapi/MCP/revocation/dual-validation/mobile/CIBA/Fintech/STT v2/SPA — details in [docs/test-results.md](docs/test-results.md), Thai). **Security audit** answering the reviewer's 4 implementation questions (ticket broker storage/atomic revocation/restart, session guard coverage, STT atomic consume, token exchange authorization): [docs/SECURITY-AUDIT.md](docs/SECURITY-AUDIT.md) — restart-survival gap closed with `STORE_BACKEND=redis` (AOF persistence proven by restart test). Remaining known gaps: manual browser demo checklist (test-results §3) and the tenant-rejection case when tenant isn't hardcoded (⚠️ see §1 item 7 of that file).
 
 ## 7. How to run
 
@@ -257,6 +286,11 @@ bash scripts/fintech-test.sh            # Fintech: own login form (Direct Grant)
 bash scripts/setup-stt.sh               # STT: stt-bridge scope + confidential cis-web/portal + Token Exchange (idempotent)
 bash scripts/stt-test.sh                # STT: cross-app session transfer + dest binding + global logout
 bash scripts/mcp-test.sh                # MCP server (Streamable HTTP): apikey auth + scope-gated tools
+bash scripts/setup-claw.sh              # SPA: public client claw-web with PKCE S256 enforced (idempotent)
+docker compose up -d claw-web           # static SPA on :3060 (builds the Login SDK inside the image)
+bash scripts/claw-test.sh               # SPA E2E: PKCE enforced, sign-in via Central ID, Kong 200/201, refresh, logout
+# browser check (Edge via Playwright) — proves the SDK works under the app CSP:
+# cd tools/screenshots && set -a && source ../../.env && set +a && node claw.mjs   → 17 checks + screenshots
 
 # 3) Central API Keys — mint a scope-bound key from the ID Portal, then call the Open API
 UT=$(curl -s "http://localhost:8080/realms/central/protocol/openid-connect/token" \
@@ -320,6 +354,8 @@ docker compose ps
 | MCP tools/call `create_order` with a read-only key | Tool error citing `orders.write` |
 | API key revoked at the ID Portal | Kong gateway rejects it after the cache TTL |
 | Portal opened through Kong (`/portal/…`) | Served via the gateway; host-wide SSO cookie still works |
+| SPA: authorize request without PKCE (or with `plain`) | Rejected at the authorization endpoint — no code issued, no login page |
+| SPA signs in with `@central/login-js` → calls Buyer API through Kong | 200 / 201 with a Bearer token minted in the browser (no client secret) |
 
 Every result is logged in [docs/test-results.md](docs/test-results.md) (Thai).
 
@@ -381,6 +417,7 @@ All UI screenshots live in [docs/screenshots/](docs/screenshots/) (English UI �
 | ![ID Portal landing](docs/screenshots/01-central-id-portal-guest.png) | ![Buyer via SSO](docs/screenshots/07-buyer-portal-dashboard-sso.png) |
 | ![Fintech Embedded Login](docs/screenshots/21-fintech-login-form.png) | ![Cross-app SSO ticket](docs/screenshots/29-cis-newtab-sso.png) |
 | ![Central API Keys](docs/screenshots/34-apikeys-en.png) | ![ID device approval (CIBA)](docs/screenshots/18-id-device-approval.png) |
+| ![Claw Web — SPA dashboard](docs/screenshots/32-claw-dashboard-en.png) | ![Claw Web — Buyer API via Kong](docs/screenshots/33-claw-api-en.png) |
 
 ## 13. Troubleshooting (things we actually hit while building this)
 
@@ -393,6 +430,10 @@ All UI screenshots live in [docs/screenshots/](docs/screenshots/) (English UI �
 | `buyer-user` suddenly 401s during repeated test runs | realm brute-force protection locked the account (by design) | unlock via Admin API: `DELETE /admin/realms/central/attack-detection/brute-force/users/buyer-user` |
 | MCP client gets 401 | missing/invalid API key header | send `apikey: central_…` (mint at ID Portal → API Keys) |
 | MCP transport rejects the request | client must accept both content types | send `Accept: application/json, text/event-stream` |
+| SPA (claw-web) cannot finish sign-in; console shows `Failed to fetch` on the token endpoint | browser CORS: Keycloak only sends CORS headers to the client's `webOrigins` | add the app origin to **Web Origins** of the client (`setup-claw.sh` does it for `claw-web`) |
+| SPA keeps bouncing to Keycloak and back | redirect loop guard: automatic sign-in stops after an OP error, after logout, or after 3 redirects in 30 s | wait 60 s, then click **Sign in**; check the Keycloak logs for the OP error |
+| SPA shows "unknown signing key" after sign-in | the id_token was signed with a `kid` that is not in the JWKS yet | usually transient during key rotation; the SDK refetches the JWKS once — check that Keycloak can reach itself at the configured issuer |
+| E2E test fails right after a negative PKCE test (wrong verifier / code reuse) | Keycloak revokes the tokens of that session after a failed code exchange — by design | run negative tests **last** in the session (as `claw-test.sh` does) or start a new session |
 
 ## 14. License
 

@@ -1,0 +1,49 @@
+# Claw Web — static SPA · ตัวแปร ${KEYCLOAK_ORIGIN} / ${KONG_ORIGIN} ถูกแทนที่จาก env ตอน container เริ่ม
+# (compose ตั้ง NGINX_ENVSUBST_FILTER ให้แทนที่เฉพาะสองตัวนี้ — ตัวแปรของ nginx เช่น $uri ไม่ถูกแตะ)
+#
+# CSP:
+#   script/style เฉพาะไฟล์ของแอปเอง (ไม่มี inline script/style)
+#   connect-src เฉพาะ Keycloak (แลก token, ดึง JWKS) + Kong (เรียก API) — แอปเชื่อมต่อที่อื่นไม่ได้
+#   การ redirect ไปหน้า login ของ Keycloak เป็น navigation ปกติ ไม่ถูก CSP จำกัด
+map $host $csp {
+    default "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ${KEYCLOAK_ORIGIN} ${KONG_ORIGIN}; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+}
+
+server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+    include /etc/nginx/snippets/security-headers.conf;
+
+    # โค้ดแอปและ config ไม่ให้ browser cache (กันโค้ด SDK เวอร์ชันเก่าค้างหลังอัปเดต)
+    location /js/ {
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "no-cache" always;
+        try_files $uri =404;
+    }
+    location /css/ {
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "no-cache" always;
+        try_files $uri =404;
+    }
+    location /vendor/ {
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "no-cache" always;
+        try_files $uri =404;
+    }
+
+    # callback จาก Keycloak: query string มี authorization code → ห้าม log และห้าม cache
+    location = /auth/callback {
+        access_log off;
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "no-store" always;
+        try_files /index.html =404;
+    }
+
+    # SPA: path ใดก็ตามที่ไม่ใช่ไฟล์ → index.html (ไม่ cache เพราะเป็น shell ของแอป)
+    location / {
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "no-store" always;
+        try_files $uri $uri/ /index.html;
+    }
+}

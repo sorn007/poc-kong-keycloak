@@ -1,0 +1,3 @@
+# ไฟล์เหล่านี้ต้องเป็น LF เสมอ — CRLF ทำให้ shebang พังเมื่อถูก copy เข้า Linux image และทำให้ heredoc ใน script ต่างไป
+*.sh text eol=lf
+docker-entrypoint.d/* text eol=lf

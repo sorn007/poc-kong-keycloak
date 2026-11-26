@@ -1,0 +1,28 @@
+{
+  "name": "@central/login-js",
+  "version": "0.1.0",
+  "description": "Central Login SDK for browser single-page apps: OIDC Authorization Code + PKCE (S256), in-memory tokens, refresh rotation, silent SSO, RP-initiated logout (ADR-009)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test --test-timeout=20000 test/*.test.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}
